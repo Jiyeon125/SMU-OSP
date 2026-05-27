@@ -24,6 +24,8 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/v1/users/", include("users.urls")),
     path("api/v1/posts/", include("posts.urls")),
+    path("api/v1/repositories/", include("repos.urls_repositories")),
+    path("api/v1/rankings/", include("repos.urls_rankings")),
 ]
 
 if settings.DEBUG:

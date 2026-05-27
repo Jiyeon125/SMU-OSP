@@ -9,4 +9,8 @@ from users.tasks import initial_process
 def user_post_save(sender, instance, created, **kwargs):
     if created:
         print(f"User {instance.username} created")
-        initial_process.delay(instance.username)
+        try:
+            initial_process.delay(instance.username)
+        except Exception as e:
+            # PoC: Celery broker(Redis)가 없거나 GH_PAT 미설정 시 가입 자체는 막지 않음
+            print(f"[signals] initial_process dispatch skipped: {e}")

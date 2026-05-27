@@ -52,6 +52,7 @@ CUSTOM_APPS = [
     "common.apps.CommonConfig",
     "users.apps.UsersConfig",
     "posts.apps.PostsConfig",
+    "repos.apps.ReposConfig",
 ]
 
 SYSTEM_APPS = [
@@ -169,8 +170,14 @@ MEDIA_URL = "images/"
 
 
 if DEBUG:
-    CORS_ALLOWED_ORIGINS = ["http://127.0.0.1:5173"]
-    CSRF_TRUSTED_ORIGINS = ["http://127.0.0.1:5173"]
+    CORS_ALLOWED_ORIGINS = [
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ]
+    CSRF_TRUSTED_ORIGINS = [
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ]
 else:
     CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS")
     CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS")
@@ -179,6 +186,10 @@ CORS_ALLOW_CREDENTIALS = True
 GH_CLIENT_ID = env("GH_CLIENT_ID")
 GH_CLIENT_SECRET = env("GH_CLIENT_SECRET")
 GH_PAT = env("GH_PAT")
+
+# repos 앱이 사용하는 GitHub REST API 설정 (token 비어 있으면 비인증 호출)
+GITHUB_API_BASE_URL = env("GITHUB_API_BASE_URL", default="https://api.github.com")
+GITHUB_TOKEN = env("GITHUB_TOKEN", default="")
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "static/"
