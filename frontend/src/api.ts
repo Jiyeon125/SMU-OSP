@@ -61,6 +61,25 @@ export const getPostCount = () =>
 export const getCarouselPosts = () =>
   instance.get("posts?carousel").then((response) => response.data);
 
+export const getProjects = ({
+  start = null,
+  limit = null,
+}: {
+  start?: number | null;
+  limit?: number | null;
+} = {}) =>
+  instance
+    .get("projects/", {
+      params: {
+        ...(start !== null && { start }),
+        ...(limit !== null && { limit }),
+      },
+    })
+    .then((response) => response.data);
+
+export const getProject = (id: string | number) =>
+  instance.get(`projects/${id}`).then((response) => response.data);
+
 export const checkUserExist = (code: string) =>
   instance
     .post(
