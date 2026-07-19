@@ -1,11 +1,13 @@
+from django.db import IntegrityError, transaction
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from common.responses import fail, success
+from teams.models import Team
 
 from .models import Project
-from .serializers import ProjectSerializer
+from .serializers import ProjectCreateSerializer, ProjectSerializer
 
 DEFAULT_PAGE_SIZE = 10
 
@@ -66,6 +68,65 @@ class Projects(APIView):
             status=status.HTTP_200_OK,
         )
 
+    def post(self, request):
+        if not request.user.is_authenticated:
+            return Response(
+                fail(
+                    "PERMISSION_DENIED",
+                    "로그인이 필요합니다.",
+                    status.HTTP_403_FORBIDDEN,
+                ),
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = ProjectCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                fail(
+                    "INVALID_PROJECT_INPUT",
+                    first_serializer_error(serializer.errors),
+                    status.HTTP_400_BAD_REQUEST,
+                ),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        data = serializer.validated_data
+        repository_url = data.get("repository_url")
+
+        try:
+            with transaction.atomic():
+                team = Team.objects.create(
+                    name=data["name"],
+                    description=data["description"],
+                    leader=request.user,
+                    leader_name=request.user.name,
+                )
+                project = Project.objects.create(
+                    team=team,
+                    name=data["name"],
+                    description=data["description"],
+                    repository_url=repository_url,
+                    demo_url=data.get("demo_url"),
+                    presentation_url=data.get("presentation_url"),
+                    tech_stack=data.get("tech_stack", []),
+                    used_open_source=data.get("used_open_source", []),
+                    visibility=data.get("visibility", Project.Visibility.PUBLIC),
+                )
+        except IntegrityError:
+            return Response(
+                fail(
+                    "INVALID_PROJECT_INPUT",
+                    "이미 등록된 프로젝트명입니다.",
+                    status.HTTP_400_BAD_REQUEST,
+                ),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            success(ProjectSerializer(project).data),
+            status=status.HTTP_201_CREATED,
+        )
+
 
 class ProjectDetail(APIView):
     def get(self, request, pk):
@@ -83,3 +144,16 @@ class ProjectDetail(APIView):
 
         serializer = ProjectSerializer(project)
         return Response(success(serializer.data), status=status.HTTP_200_OK)
+
+
+def first_serializer_error(errors):
+    if isinstance(errors, dict):
+        first_value = next(iter(errors.values()), None)
+        if isinstance(first_value, list) and first_value:
+            return str(first_value[0])
+        if isinstance(first_value, dict):
+            return first_serializer_error(first_value)
+        if first_value:
+            return str(first_value)
+
+    return "입력값을 확인해주세요."
