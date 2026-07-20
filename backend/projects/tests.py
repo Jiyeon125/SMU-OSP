@@ -701,6 +701,74 @@ class ProjectApiTests(TestCase):
         )
         self.assertEqual(body["detail"]["httpStatus"], 400)
 
+    def test_project_membership_history_requires_login(self):
+        response = self.client.get("/api/v1/projects/members")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["status"], "PERMISSION_DENIED")
+
+    def test_project_membership_history_returns_all_attempts_latest_first(self):
+        application_project = Project.objects.create(
+            name="Application Project",
+            description="Application history target",
+        )
+        declined = Member.objects.create(
+            project=application_project,
+            user=self.user,
+            status=Member.Status.DECLINED,
+            description="모집 인원 마감",
+        )
+        applied = Member.objects.create(
+            project=application_project,
+            user=self.user,
+            status=Member.Status.APPLIED,
+        )
+        other_user = get_user_model().objects.create_user(
+            username="other-applicant",
+            password="password",
+            github_email="other-applicant@sookmyung.ac.kr",
+            name="다른 신청자",
+            student_id=220,
+            major="컴퓨터과학",
+        )
+        Member.objects.create(
+            project=application_project,
+            user=other_user,
+            status=Member.Status.APPLIED,
+        )
+        older_time = timezone.now() - timedelta(days=1)
+        Member.objects.filter(pk=declined.pk).update(created_at=older_time)
+        self.client.force_login(self.user)
+
+        response = self.client.get("/api/v1/projects/members")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "SUCCESS")
+        self.assertIsNone(body["detail"])
+        self.assertEqual(
+            [membership["id"] for membership in body["data"]],
+            [applied.pk, declined.pk],
+        )
+        self.assertEqual(
+            [membership["status"] for membership in body["data"]],
+            [Member.Status.APPLIED, Member.Status.DECLINED],
+        )
+        self.assertEqual(body["data"][0]["projectId"], application_project.pk)
+        self.assertEqual(body["data"][0]["projectName"], "Application Project")
+        self.assertEqual(body["data"][0]["projectStatus"], Project.Status.ACTIVE)
+        self.assertEqual(body["data"][0]["userId"], self.user.pk)
+        self.assertIn("createdAt", body["data"][0])
+        self.assertIn("updatedAt", body["data"][0])
+
+    def test_project_membership_history_returns_empty_list(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get("/api/v1/projects/members")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"], [])
+
     def create_projects_for_pagination(self, total):
         self.project.delete()
         base = timezone.now()

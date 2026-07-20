@@ -12,6 +12,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { LuArrowUpDown, LuFilter, LuSearch } from "react-icons/lu";
 import { Link as RouterLink } from "react-router-dom";
+import ProjectApplicationHistory from "../components/ProjectApplicationHistory";
 import ProjectCard, {
   MembershipRolePill,
 } from "../components/ProjectCard";
@@ -25,7 +26,33 @@ import { getPageWindow } from "../utils/pagination";
 const CARD_PAGE_SIZE = 12;
 const BOARD_PAGE_SIZE = 20;
 const PAGE_WINDOW_SIZE = 10;
-type ProjectScope = "all" | "owned" | "joined";
+type ProjectScope = "all" | "owned" | "joined" | "applications";
+
+const SCOPE_CONTENT: Record<
+  ProjectScope,
+  { title: string; description: string; emptyMessage: string }
+> = {
+  all: {
+    title: "전체 프로젝트",
+    description: "등록된 프로젝트와 Repository 연결 정보를 확인해 보세요.",
+    emptyMessage: "등록된 프로젝트가 없습니다.",
+  },
+  owned: {
+    title: "운영 중인 프로젝트",
+    description: "내가 팀장으로 운영 중인 프로젝트를 확인해 보세요.",
+    emptyMessage: "운영 중인 프로젝트가 없습니다.",
+  },
+  joined: {
+    title: "참여 중인 프로젝트",
+    description: "내가 팀원으로 참여 중인 프로젝트를 확인해 보세요.",
+    emptyMessage: "참여 중인 프로젝트가 없습니다.",
+  },
+  applications: {
+    title: "참여 신청 내역",
+    description: "프로젝트 참여 신청의 처리 상태와 지난 이력을 확인해 보세요.",
+    emptyMessage: "프로젝트 신청 내역이 없습니다.",
+  },
+};
 
 function ProjectTreeItem({
   active,
@@ -80,6 +107,7 @@ export default function ProjectListPage() {
         owned: projectScope === "owned",
         joined: projectScope === "joined",
       }),
+    enabled: projectScope !== "applications",
   });
 
   const projects = data?.status === "SUCCESS" ? data.data : [];
@@ -88,18 +116,7 @@ export default function ProjectListPage() {
   const pageNumbers = getPageWindow(page, totalPages, PAGE_WINDOW_SIZE);
   const hasPreviousGroup = pageNumbers[0] > 1;
   const hasNextGroup = pageNumbers[pageNumbers.length - 1] < totalPages;
-  const emptyMessage =
-    projectScope === "all"
-      ? "등록된 프로젝트가 없습니다."
-      : projectScope === "owned"
-        ? "운영 중인 프로젝트가 없습니다."
-        : "참여 중인 프로젝트가 없습니다.";
-  const pageTitle =
-    projectScope === "all"
-      ? "전체 프로젝트"
-      : projectScope === "owned"
-        ? "운영 중인 프로젝트"
-        : "참여 중인 프로젝트";
+  const scopeContent = SCOPE_CONTENT[projectScope];
 
   return (
     <Box px={{ base: 4, md: 10 }} py={6} maxW={"1280px"} mx={"auto"}>
@@ -170,6 +187,15 @@ export default function ProjectListPage() {
                     >
                       참여 중인 프로젝트
                     </ProjectTreeItem>
+                    <ProjectTreeItem
+                      active={projectScope === "applications"}
+                      onClick={() => {
+                        setProjectScope("applications");
+                        setPage(1);
+                      }}
+                    >
+                      참여 신청 내역
+                    </ProjectTreeItem>
                   </VStack>
                 </Box>
               </VStack>
@@ -186,14 +212,10 @@ export default function ProjectListPage() {
           >
             <Box>
               <Text fontSize={"2xl"} fontWeight={"bold"} color={"smu.blue"}>
-                {pageTitle}
+                {scopeContent.title}
               </Text>
               <Text fontSize={"sm"} color={"smu.darkGray"}>
-                {projectScope === "all"
-                  ? "등록된 프로젝트와 Repository 연결 정보를 확인해 보세요."
-                  : projectScope === "owned"
-                    ? "내가 팀장으로 운영 중인 프로젝트를 확인해 보세요."
-                    : "내가 팀원으로 참여 중인 프로젝트를 확인해 보세요."}
+                {scopeContent.description}
               </Text>
             </Box>
             <RouterLink to="/projects/new" style={{ display: "block" }}>
@@ -207,6 +229,10 @@ export default function ProjectListPage() {
             </RouterLink>
           </Flex>
 
+          {projectScope === "applications" ? (
+            <ProjectApplicationHistory />
+          ) : (
+            <>
           <Flex
             p={3}
             justifyContent={"space-between"}
@@ -305,7 +331,7 @@ export default function ProjectListPage() {
             borderRadius={"lg"}
             bg={"#f7f7f7"}
           >
-            <Text color={"smu.darkGray"}>{emptyMessage}</Text>
+            <Text color={"smu.darkGray"}>{scopeContent.emptyMessage}</Text>
           </Box>
         ) : (
           <>
@@ -477,6 +503,8 @@ export default function ProjectListPage() {
             </HStack>
           </>
         )}
+            </>
+          )}
         </VStack>
       </Flex>
     </Box>

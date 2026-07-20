@@ -11,6 +11,7 @@ from .models import Member, Project, Repository
 from .serializers import (
     ProjectCreateSerializer,
     ProjectDetailSerializer,
+    ProjectMembershipHistorySerializer,
     ProjectSerializer,
     ProjectUpdateSerializer,
 )
@@ -353,6 +354,27 @@ class ProjectDetail(APIView):
             success(None),
             status=status.HTTP_200_OK,
         )
+
+
+class ProjectMemberships(APIView):
+    def get(self, request):
+        if not request.user.is_authenticated:
+            return Response(
+                fail(
+                    "PERMISSION_DENIED",
+                    "로그인이 필요합니다.",
+                    status.HTTP_403_FORBIDDEN,
+                ),
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        memberships = (
+            Member.objects.select_related("project")
+            .filter(user=request.user, is_leader=False)
+            .order_by("-created_at", "-pk")
+        )
+        serializer = ProjectMembershipHistorySerializer(memberships, many=True)
+        return Response(success(serializer.data), status=status.HTTP_200_OK)
 
 
 def update_project_repository(project, repository_url):

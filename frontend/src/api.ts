@@ -87,6 +87,9 @@ export const getProjects = ({
 export const getProject = (id: string | number) =>
   instance.get(`projects/${id}`).then((response) => response.data);
 
+export const getProjectMemberships = () =>
+  instance.get("projects/members").then((response) => response.data);
+
 export const createProject = (data: ProjectInput) =>
   instance
     .post("projects/", data, {
