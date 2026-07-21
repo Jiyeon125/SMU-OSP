@@ -718,10 +718,10 @@ class ProjectApiTests(TestCase):
             status=Member.Status.DECLINED,
             description="모집 인원 마감",
         )
-        applied = Member.objects.create(
+        pending = Member.objects.create(
             project=application_project,
             user=self.user,
-            status=Member.Status.APPLIED,
+            status=Member.Status.PENDING,
         )
         other_user = get_user_model().objects.create_user(
             username="other-applicant",
@@ -734,7 +734,7 @@ class ProjectApiTests(TestCase):
         Member.objects.create(
             project=application_project,
             user=other_user,
-            status=Member.Status.APPLIED,
+            status=Member.Status.PENDING,
         )
         older_time = timezone.now() - timedelta(days=1)
         Member.objects.filter(pk=declined.pk).update(created_at=older_time)
@@ -748,11 +748,11 @@ class ProjectApiTests(TestCase):
         self.assertIsNone(body["detail"])
         self.assertEqual(
             [membership["id"] for membership in body["data"]],
-            [applied.pk, declined.pk],
+            [pending.pk, declined.pk],
         )
         self.assertEqual(
             [membership["status"] for membership in body["data"]],
-            [Member.Status.APPLIED, Member.Status.DECLINED],
+            [Member.Status.PENDING, Member.Status.DECLINED],
         )
         self.assertEqual(body["data"][0]["projectId"], application_project.pk)
         self.assertEqual(body["data"][0]["projectName"], "Application Project")

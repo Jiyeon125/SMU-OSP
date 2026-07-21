@@ -1,7 +1,6 @@
 export type ProjectStatus = "ACTIVE" | "FINISHED" | "INACTIVE" | "DELETED";
 export type ProjectMemberRole = "LEADER" | "MEMBER";
 export type ProjectApplicationStatus =
-  | "APPLIED"
   | "PENDING"
   | "JOINED"
   | "DECLINED"

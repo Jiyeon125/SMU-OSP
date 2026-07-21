@@ -27,7 +27,6 @@ const STATUS_META: Record<
   ProjectApplicationStatus,
   { label: string; bg: string; color: string }
 > = {
-  APPLIED: { label: "승인 대기", bg: "#fff3cd", color: "#8a5a00" },
   PENDING: { label: "승인 대기", bg: "#fff3cd", color: "#8a5a00" },
   JOINED: { label: "수락 · 참여 중", bg: "#dff5e5", color: "#176b35" },
   DECLINED: { label: "반려", bg: "#fde2e2", color: "#a32222" },
@@ -37,7 +36,7 @@ const STATUS_META: Record<
 
 function matchesStatus(status: ProjectApplicationStatus, filter: StatusFilter) {
   if (filter === "ALL") return true;
-  if (filter === "WAITING") return status === "APPLIED" || status === "PENDING";
+  if (filter === "WAITING") return status === "PENDING";
   if (filter === "CLOSED") return status === "LEFT" || status === "CANCELLED";
   return status === filter;
 }
