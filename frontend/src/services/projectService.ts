@@ -92,6 +92,16 @@ export async function cancelProjectApplication(
   }
 }
 
+export async function leaveProject(
+  projectId: number
+): Promise<ApiResponse<null>> {
+  try {
+    return await deleteProjectMembership(projectId);
+  } catch (e) {
+    return toApiResponse<null>(e, "프로젝트 탈퇴 중 오류가 발생했습니다.");
+  }
+}
+
 export async function createProject(
   input: ProjectInput
 ): Promise<ApiResponse<Project>> {

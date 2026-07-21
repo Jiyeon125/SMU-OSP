@@ -1,8 +1,10 @@
 import { Box, HStack, SimpleGrid, Spinner, Text, VStack } from "@chakra-ui/react";
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
+import ProjectLeaveDialog from "../components/ProjectLeaveDialog";
 import { Button } from "../components/ui/button";
-import { getProject } from "../services/projectService";
+import { getProject, leaveProject } from "../services/projectService";
 import {
   PROJECT_MEMBER_ROLE_LABEL,
   PROJECT_STATUS_LABEL,
@@ -135,11 +137,33 @@ function ExternalTextLink({
 export default function ProjectDetailPage() {
   const { id = "" } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
+  const [leaveMessage, setLeaveMessage] = useState("");
 
   const projectQuery = useQuery({
     queryKey: ["project", id],
     queryFn: () => getProject(id),
     enabled: !!id,
+  });
+
+  const leaveMutation = useMutation({
+    mutationFn: (projectId: number) => leaveProject(projectId),
+    onSuccess: async (response) => {
+      if (response.status !== "SUCCESS") {
+        setLeaveMessage(response.detail.message);
+        return;
+      }
+      setLeaveDialogOpen(false);
+      setLeaveMessage("프로젝트에서 탈퇴했습니다.");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["project", id] }),
+        queryClient.invalidateQueries({ queryKey: ["projects"] }),
+        queryClient.invalidateQueries({
+          queryKey: ["project-application-history"],
+        }),
+      ]);
+    },
   });
 
   if (projectQuery.isLoading) {
@@ -178,6 +202,10 @@ export default function ProjectDetailPage() {
   const project = resp.data;
   const repositoryName = project.repository?.fullName;
   const repositoryUrl = project.repository?.htmlUrl;
+  const leave = () => {
+    setLeaveMessage("");
+    leaveMutation.mutate(project.id);
+  };
 
   return (
     <Box px={{ base: 4, md: 10 }} py={6} maxW={"1000px"} mx={"auto"}>
@@ -186,15 +214,51 @@ export default function ProjectDetailPage() {
           <Button variant={"outline"} onClick={() => navigate("/projects")}>
             목록으로
           </Button>
-          {project.canEdit && (
-            <Button
-              bg={"smu.blue"}
-              onClick={() => navigate(`/projects/${project.id}/edit`)}
-            >
-              프로젝트 수정
-            </Button>
-          )}
+          <HStack>
+            {project.membershipRole === "MEMBER" && (
+              <Button
+                colorPalette="red"
+                variant="outline"
+                disabled={leaveMutation.isPending}
+                onClick={() => setLeaveDialogOpen(true)}
+              >
+                {leaveMutation.isPending ? "탈퇴 중..." : "프로젝트 탈퇴"}
+              </Button>
+            )}
+            {project.canEdit && (
+              <Button
+                bg={"smu.blue"}
+                onClick={() => navigate(`/projects/${project.id}/edit`)}
+              >
+                프로젝트 수정
+              </Button>
+            )}
+          </HStack>
         </HStack>
+
+        {leaveMessage && (
+          <Box
+            role={leaveMutation.data?.status === "SUCCESS" ? "status" : "alert"}
+            p={3}
+            borderWidth={1}
+            borderColor={
+              leaveMutation.data?.status === "SUCCESS"
+                ? "smu.lightBlue"
+                : "smu.orange"
+            }
+            borderRadius="md"
+            bg="white"
+          >
+            <Text fontSize="sm">{leaveMessage}</Text>
+          </Box>
+        )}
+
+        <ProjectLeaveDialog
+          open={leaveDialogOpen}
+          setOpen={setLeaveDialogOpen}
+          onConfirm={leave}
+          isPending={leaveMutation.isPending}
+        />
 
         <Box
           p={6}
