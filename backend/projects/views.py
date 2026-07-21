@@ -377,6 +377,76 @@ class ProjectMemberships(APIView):
         return Response(success(serializer.data), status=status.HTTP_200_OK)
 
 
+class ProjectMembers(APIView):
+    def delete(self, request, pk):
+        if not request.user.is_authenticated:
+            return Response(
+                fail(
+                    "PERMISSION_DENIED",
+                    "로그인이 필요합니다.",
+                    status.HTTP_403_FORBIDDEN,
+                ),
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if not Project.objects.filter(pk=pk).exists():
+            return Response(
+                fail(
+                    "PROJECT_NOT_FOUND",
+                    f"id={pk}에 해당하는 프로젝트를 찾을 수 없습니다.",
+                    status.HTTP_404_NOT_FOUND,
+                ),
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        with transaction.atomic():
+            membership = (
+                Member.objects.select_for_update()
+                .filter(project_id=pk, user=request.user)
+                .order_by("-created_at", "-pk")
+                .first()
+            )
+
+            if membership is None:
+                return Response(
+                    fail(
+                        "MEMBERSHIP_NOT_FOUND",
+                        "해당 프로젝트의 참여 또는 신청 내역을 찾을 수 없습니다.",
+                        status.HTTP_404_NOT_FOUND,
+                    ),
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            if membership.is_leader:
+                return Response(
+                    fail(
+                        "PERMISSION_DENIED",
+                        "프로젝트 팀장은 탈퇴할 수 없습니다.",
+                        status.HTTP_403_FORBIDDEN,
+                    ),
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            next_status = {
+                Member.Status.PENDING: Member.Status.CANCELED,
+                Member.Status.JOINED: Member.Status.LEFT,
+            }.get(membership.status)
+            if next_status is None:
+                return Response(
+                    fail(
+                        "INVALID_MEMBER_STATUS",
+                        "현재 상태에서는 신청 취소 또는 프로젝트 탈퇴를 할 수 없습니다.",
+                        status.HTTP_400_BAD_REQUEST,
+                    ),
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            membership.status = next_status
+            membership.save(update_fields=("status", "updated_at"))
+
+        return Response(success(None), status=status.HTTP_200_OK)
+
+
 def update_project_repository(project, repository_url):
     repository = getattr(project, "repository", None)
 

@@ -5,7 +5,7 @@ export type ProjectApplicationStatus =
   | "JOINED"
   | "DECLINED"
   | "LEFT"
-  | "CANCELLED";
+  | "CANCELED";
 
 export interface ProjectDetailMember {
   id: number;

@@ -7,10 +7,13 @@ import {
   Text,
   VStack,
 } from "@chakra-ui/react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
-import { listProjectApplications } from "../services/projectService";
+import {
+  cancelProjectApplication,
+  listProjectApplications,
+} from "../services/projectService";
 import {
   PROJECT_STATUS_LABEL,
   ProjectApplicationStatus,
@@ -31,23 +34,39 @@ const STATUS_META: Record<
   JOINED: { label: "수락 · 참여 중", bg: "#dff5e5", color: "#176b35" },
   DECLINED: { label: "반려", bg: "#fde2e2", color: "#a32222" },
   LEFT: { label: "참여 종료", bg: "#eceff1", color: "#455a64" },
-  CANCELLED: { label: "신청 취소", bg: "#eceff1", color: "#455a64" },
+  CANCELED: { label: "신청 취소", bg: "#eceff1", color: "#455a64" },
 };
 
 function matchesStatus(status: ProjectApplicationStatus, filter: StatusFilter) {
   if (filter === "ALL") return true;
   if (filter === "WAITING") return status === "PENDING";
-  if (filter === "CLOSED") return status === "LEFT" || status === "CANCELLED";
+  if (filter === "CLOSED") return status === "LEFT" || status === "CANCELED";
   return status === filter;
 }
 
 export default function ProjectApplicationHistory() {
+  const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [sortOrder, setSortOrder] = useState<SortOrder>("LATEST");
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ["project-application-history"],
     queryFn: listProjectApplications,
     retry: false,
+  });
+  const cancelMutation = useMutation({
+    mutationFn: cancelProjectApplication,
+    onMutate: () => setCancelError(null),
+    onSuccess: async (response) => {
+      if (response.status !== "SUCCESS") {
+        setCancelError(response.detail.message);
+        return;
+      }
+
+      await queryClient.invalidateQueries({
+        queryKey: ["project-application-history"],
+      });
+    },
   });
 
   const applications = useMemo(() => {
@@ -65,6 +84,18 @@ export default function ProjectApplicationHistory() {
 
   return (
     <VStack alignItems="stretch" gap={4}>
+      {cancelError && (
+        <Box
+          role="alert"
+          p={3}
+          borderWidth={1}
+          borderColor="#f3b1b1"
+          borderRadius="lg"
+          bg="#fff4f4"
+        >
+          <Text color="#a32222">{cancelError}</Text>
+        </Box>
+      )}
       <Flex
         p={3}
         alignItems={{ base: "stretch", md: "center" }}
@@ -213,14 +244,35 @@ export default function ProjectApplicationHistory() {
                   )}
                 </VStack>
 
-                <RouterLink
-                  to={`/projects/${application.projectId}`}
-                  style={{ display: "block", marginTop: "1rem" }}
-                >
-                  <Button size="sm" width="100%" variant="outline">
-                    프로젝트 보기
-                  </Button>
-                </RouterLink>
+                <Flex mt={4} gap={2}>
+                  {application.status === "PENDING" && (
+                    <Button
+                      size="sm"
+                      flex={1}
+                      colorPalette="red"
+                      variant="outline"
+                      disabled={cancelMutation.isPending}
+                      loading={
+                        cancelMutation.isPending &&
+                        cancelMutation.variables === application.projectId
+                      }
+                      loadingText="취소 중"
+                      onClick={() =>
+                        cancelMutation.mutate(application.projectId)
+                      }
+                    >
+                      신청 취소
+                    </Button>
+                  )}
+                  <RouterLink
+                    to={`/projects/${application.projectId}`}
+                    style={{ display: "block", flex: 1 }}
+                  >
+                    <Button size="sm" width="100%" variant="outline">
+                      프로젝트 보기
+                    </Button>
+                  </RouterLink>
+                </Flex>
               </Box>
             );
           })}

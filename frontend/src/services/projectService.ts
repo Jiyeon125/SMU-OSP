@@ -1,6 +1,7 @@
 import axios from "axios";
 import {
   createProject as createProjectApi,
+  deleteProjectMembership,
   getProject as getProjectApi,
   getProjectMemberships,
   getProjects,
@@ -78,6 +79,16 @@ export async function listProjectApplications(): Promise<
       e,
       "프로젝트 신청 내역 조회 중 오류가 발생했습니다."
     );
+  }
+}
+
+export async function cancelProjectApplication(
+  projectId: number
+): Promise<ApiResponse<null>> {
+  try {
+    return await deleteProjectMembership(projectId);
+  } catch (e) {
+    return toApiResponse<null>(e, "프로젝트 신청 취소 중 오류가 발생했습니다.");
   }
 }
 

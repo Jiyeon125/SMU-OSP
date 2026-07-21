@@ -90,6 +90,15 @@ export const getProject = (id: string | number) =>
 export const getProjectMemberships = () =>
   instance.get("projects/members").then((response) => response.data);
 
+export const deleteProjectMembership = (projectId: string | number) =>
+  instance
+    .delete(`projects/${projectId}/members`, {
+      headers: {
+        "X-CSRFToken": Cookie.get("csrftoken") || "",
+      },
+    })
+    .then((response) => response.data);
+
 export const createProject = (data: ProjectInput) =>
   instance
     .post("projects/", data, {
