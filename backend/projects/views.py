@@ -400,14 +400,13 @@ class ProjectMembers(APIView):
             )
 
         with transaction.atomic():
-            membership = (
+            memberships = list(
                 Member.objects.select_for_update()
                 .filter(project_id=pk, user=request.user)
                 .order_by("-created_at", "-pk")
-                .first()
             )
 
-            if membership is None:
+            if not memberships:
                 return Response(
                     fail(
                         "MEMBERSHIP_NOT_FOUND",
@@ -417,7 +416,11 @@ class ProjectMembers(APIView):
                     status=status.HTTP_404_NOT_FOUND,
                 )
 
-            if membership.is_leader:
+            if any(
+                membership.is_leader
+                and membership.status == Member.Status.JOINED
+                for membership in memberships
+            ):
                 return Response(
                     fail(
                         "PERMISSION_DENIED",
@@ -427,6 +430,7 @@ class ProjectMembers(APIView):
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
+            membership = memberships[0]
             next_status = {
                 Member.Status.PENDING: Member.Status.CANCELED,
                 Member.Status.JOINED: Member.Status.LEFT,
