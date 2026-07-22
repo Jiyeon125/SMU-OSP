@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import ProjectLeaveDialog from "../components/ProjectLeaveDialog";
+import ProjectMemberManagementDialog from "../components/ProjectMemberManagementDialog";
 import { Button } from "../components/ui/button";
 import {
   applyToProject,
@@ -143,6 +144,7 @@ export default function ProjectDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
+  const [memberManagementOpen, setMemberManagementOpen] = useState(false);
   const [leaveMessage, setLeaveMessage] = useState("");
   const [applicationMessage, setApplicationMessage] = useState("");
 
@@ -153,7 +155,13 @@ export default function ProjectDetailPage() {
   });
 
   const leaveMutation = useMutation({
-    mutationFn: (projectId: number) => leaveProject(projectId),
+    mutationFn: ({
+      projectId,
+      description,
+    }: {
+      projectId: number;
+      description?: string;
+    }) => leaveProject(projectId, description),
     onSuccess: async (response) => {
       if (response.status !== "SUCCESS") {
         setLeaveMessage(response.detail.message);
@@ -224,9 +232,12 @@ export default function ProjectDetailPage() {
   const project = resp.data;
   const repositoryName = project.repository?.fullName;
   const repositoryUrl = project.repository?.htmlUrl;
-  const leave = () => {
+  const leave = (description: string) => {
     setLeaveMessage("");
-    leaveMutation.mutate(project.id);
+    leaveMutation.mutate({
+      projectId: project.id,
+      description: description || undefined,
+    });
   };
 
   const apply = () => {
@@ -239,11 +250,11 @@ export default function ProjectDetailPage() {
   return (
     <Box px={{ base: 4, md: 10 }} py={6} maxW={"1000px"} mx={"auto"}>
       <VStack alignItems={"stretch"} gap={5}>
-        <HStack justifyContent={"space-between"}>
+        <HStack justifyContent={"space-between"} flexWrap="wrap" gap={3}>
           <Button variant={"outline"} onClick={() => navigate("/projects")}>
             목록으로
           </Button>
-          <HStack>
+          <HStack flexWrap="wrap">
             {project.membershipRole === "MEMBER" && (
               <Button
                 colorPalette="red"
@@ -264,12 +275,20 @@ export default function ProjectDetailPage() {
               </Button>
             )}
             {project.canEdit && (
-              <Button
-                bg={"smu.blue"}
-                onClick={() => navigate(`/projects/${project.id}/edit`)}
-              >
-                프로젝트 수정
-              </Button>
+              <>
+                <Button
+                  variant="outline"
+                  onClick={() => setMemberManagementOpen(true)}
+                >
+                  신청 현황 관리
+                </Button>
+                <Button
+                  bg={"smu.blue"}
+                  onClick={() => navigate(`/projects/${project.id}/edit`)}
+                >
+                  프로젝트 수정
+                </Button>
+              </>
             )}
           </HStack>
         </HStack>
@@ -296,6 +315,13 @@ export default function ProjectDetailPage() {
           setOpen={setLeaveDialogOpen}
           onConfirm={leave}
           isPending={leaveMutation.isPending}
+        />
+
+        <ProjectMemberManagementDialog
+          open={memberManagementOpen}
+          setOpen={setMemberManagementOpen}
+          projectId={project.id}
+          projectName={project.name}
         />
 
         {(applicationMessage || project.applicationStatus === "PENDING") && (
