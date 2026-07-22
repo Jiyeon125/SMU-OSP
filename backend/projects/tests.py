@@ -1112,6 +1112,11 @@ class ProjectApiTests(TestCase):
             user=applicant,
             status=Member.Status.JOINED,
         )
+        joined_without_reason = Member.objects.create(
+            project=self.project,
+            user=applicant,
+            status=Member.Status.JOINED,
+        )
         self.client.force_login(self.user)
 
         approved = self.client.put(
@@ -1132,6 +1137,11 @@ class ProjectApiTests(TestCase):
             data={"status": Member.Status.LEFT, "description": "프로젝트 종료"},
             content_type="application/json",
         )
+        missing_reason = self.client.put(
+            f"/api/v1/projects/{self.project.pk}/members/{joined_without_reason.pk}",
+            data={"status": Member.Status.LEFT},
+            content_type="application/json",
+        )
 
         self.assertEqual(approved.status_code, 200)
         self.assertEqual(approved.json()["data"]["status"], Member.Status.JOINED)
@@ -1146,9 +1156,13 @@ class ProjectApiTests(TestCase):
             "모집 역할 불일치",
         )
         self.assertEqual(left.status_code, 200)
+        self.assertEqual(missing_reason.status_code, 400)
+        self.assertEqual(missing_reason.json()["status"], "INVALID_MEMBER_INPUT")
         joined.refresh_from_db()
+        joined_without_reason.refresh_from_db()
         self.assertEqual(joined.status, Member.Status.LEFT)
         self.assertEqual(joined.description, "프로젝트 종료")
+        self.assertEqual(joined_without_reason.status, Member.Status.JOINED)
 
     def test_project_member_update_rejects_invalid_transition_and_target(self):
         applicant = get_user_model().objects.create_user(
