@@ -273,8 +273,17 @@ class ProjectSerializer(serializers.ModelSerializer):
     )
     maxMembers = serializers.IntegerField(source="max_members")
     repository = RepositorySerializer(read_only=True, allow_null=True)
+    membershipRole = serializers.SerializerMethodField()
     createdAt = serializers.DateTimeField(source="created_at")
     updatedAt = serializers.DateTimeField(source="updated_at")
+
+    def get_membershipRole(self, project):
+        memberships = getattr(project, "request_user_memberships", None)
+        if not memberships:
+            return None
+        if any(membership.is_leader for membership in memberships):
+            return "OWNER"
+        return "MEMBER"
 
     class Meta:
         model = Project
@@ -289,6 +298,7 @@ class ProjectSerializer(serializers.ModelSerializer):
             "status",
             "maxMembers",
             "repository",
+            "membershipRole",
             "createdAt",
             "updatedAt",
         )

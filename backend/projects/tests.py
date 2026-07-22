@@ -103,6 +103,7 @@ class ProjectApiTests(TestCase):
         self.assertNotIn("repositoryUrl", body["data"][0])
         self.assertEqual(body["data"][0]["status"], "ACTIVE")
         self.assertEqual(body["data"][0]["maxMembers"], 5)
+        self.assertIsNone(body["data"][0]["membershipRole"])
         self.assertEqual(body["data"][0]["repository"]["fullName"], "Jiyeon125/SMU-OSP")
         self.assertEqual(body["detail"]["pagination"]["count"], 1)
         self.assertEqual(body["detail"]["pagination"]["currentPage"], 1)
@@ -145,6 +146,7 @@ class ProjectApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()["data"]
         self.assertEqual(data["memberCount"], 2)
+        self.assertEqual(data["membershipRole"], "OWNER")
         self.assertTrue(data["canViewMembers"])
         self.assertTrue(data["canEdit"])
         self.assertEqual(
@@ -361,6 +363,7 @@ class ProjectApiTests(TestCase):
         self.assertNotIn("repositoryUrl", body["data"])
         self.assertEqual(body["data"]["status"], "ACTIVE")
         self.assertEqual(body["data"]["maxMembers"], 5)
+        self.assertEqual(body["data"]["membershipRole"], "OWNER")
         self.assertEqual(
             body["data"]["repository"]["htmlUrl"],
             "https://github.com/example/new-project",
@@ -587,12 +590,23 @@ class ProjectApiTests(TestCase):
         self.assertTrue(body["detail"]["pagination"]["hasPrevious"])
 
     def test_project_list_invalid_pagination_parameter(self):
-        response = self.client.get("/api/v1/projects/?start=-1&limit=10")
+        invalid_queries = (
+            "start=-1&limit=10",
+            "start=abc&limit=10",
+            "start=0&limit=0",
+        )
+        for query in invalid_queries:
+            with self.subTest(query=query):
+                response = self.client.get(f"/api/v1/projects/?{query}")
 
-        self.assertEqual(response.status_code, 400)
-        body = response.json()
-        self.assertEqual(body["status"], "INVALID_PAGINATION_PARAMETER")
-        self.assertEqual(body["detail"]["httpStatus"], 400)
+                self.assertEqual(response.status_code, 400)
+                body = response.json()
+                self.assertEqual(body["status"], "INVALID_PAGINATION_PARAMETER")
+                self.assertEqual(
+                    body["detail"]["message"],
+                    "start는 0 이상, limit은 1 이상이어야 합니다.",
+                )
+                self.assertEqual(body["detail"]["httpStatus"], 400)
 
     def project_update_payload(self, **overrides):
         payload = {
@@ -607,6 +621,85 @@ class ProjectApiTests(TestCase):
         }
         payload.update(overrides)
         return payload
+
+    def test_project_list_owned_filter_requires_login(self):
+        response = self.client.get("/api/v1/projects/?owned=true")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["status"], "PERMISSION_DENIED")
+
+    def test_project_list_joined_filter_requires_login(self):
+        response = self.client.get("/api/v1/projects/?joined=true")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["status"], "PERMISSION_DENIED")
+
+    def test_project_list_owned_filter_returns_leader_projects_only(self):
+        joined_project = Project.objects.create(
+            name="Joined Project",
+            description="Joined as a member",
+        )
+        Member.objects.create(
+            project=joined_project,
+            user=self.user,
+            is_leader=False,
+            status=Member.Status.JOINED,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get("/api/v1/projects/?owned=true")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(
+            [project["id"] for project in body["data"]],
+            [self.project.pk],
+        )
+        self.assertEqual(body["data"][0]["membershipRole"], "OWNER")
+        self.assertEqual(body["detail"]["pagination"]["count"], 1)
+
+    def test_project_list_joined_filter_excludes_leader_and_inactive_memberships(self):
+        joined_project = Project.objects.create(
+            name="Joined Project",
+            description="Joined as a member",
+        )
+        Member.objects.create(
+            project=joined_project,
+            user=self.user,
+            is_leader=False,
+            status=Member.Status.JOINED,
+        )
+        left_project = Project.objects.create(
+            name="Left Project",
+            description="No longer participating",
+        )
+        Member.objects.create(
+            project=left_project,
+            user=self.user,
+            is_leader=False,
+            status=Member.Status.LEFT,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get("/api/v1/projects/?joined=true")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual([project["id"] for project in body["data"]], [joined_project.pk])
+        self.assertEqual(body["data"][0]["membershipRole"], "MEMBER")
+        self.assertEqual(body["detail"]["pagination"]["count"], 1)
+
+    def test_project_list_rejects_invalid_boolean_filter(self):
+        response = self.client.get("/api/v1/projects/?joined=yes")
+
+        self.assertEqual(response.status_code, 400)
+        body = response.json()
+        self.assertEqual(body["status"], "INVALID_PROJECT_FILTER")
+        self.assertEqual(
+            body["detail"]["message"],
+            "joined는 true 또는 false여야 합니다.",
+        )
+        self.assertEqual(body["detail"]["httpStatus"], 400)
 
     def create_projects_for_pagination(self, total):
         self.project.delete()

@@ -16,6 +16,8 @@ from .serializers import (
 )
 
 DEFAULT_PAGE_SIZE = 10
+TRUE_QUERY_VALUES = {"1", "true"}
+FALSE_QUERY_VALUES = {"0", "false"}
 
 
 def parse_repository_identity(repository_url):
@@ -38,11 +40,13 @@ def parse_pagination(query_params):
     try:
         start = int(query_params.get("start", 0))
         limit = int(query_params.get("limit", DEFAULT_PAGE_SIZE))
+        if start < 0 or limit <= 0:
+            raise ValueError
     except ValueError:
-        return None, None
-
-    if start < 0 or limit <= 0:
-        return None, None
+        raise ValueError(
+            "INVALID_PAGINATION_PARAMETER",
+            "start는 0 이상, limit은 1 이상이어야 합니다.",
+        ) from None
 
     return start, limit
 
@@ -64,17 +68,48 @@ def pagination_detail(start, limit, count):
     }
 
 
+def parse_boolean_filter(query_params, name):
+    value = query_params.get(name)
+    if value is None:
+        return False
+
+    normalized = value.strip().lower()
+    if normalized in TRUE_QUERY_VALUES:
+        return True
+    if normalized in FALSE_QUERY_VALUES:
+        return False
+
+    raise ValueError(
+        "INVALID_PROJECT_FILTER",
+        f"{name}는 true 또는 false여야 합니다.",
+    )
+
+
 class Projects(APIView):
     def get(self, request):
-        start, limit = parse_pagination(request.query_params)
-        if start is None:
+        try:
+            start, limit = parse_pagination(request.query_params)
+            joined = parse_boolean_filter(request.query_params, "joined")
+            owned = parse_boolean_filter(request.query_params, "owned")
+        except ValueError as error:
+            error_code, message = error.args
             return Response(
                 fail(
-                    "INVALID_PAGINATION_PARAMETER",
-                    "start는 0 이상, limit은 1 이상이어야 합니다.",
+                    error_code,
+                    message,
                     status.HTTP_400_BAD_REQUEST,
                 ),
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if (joined or owned) and not request.user.is_authenticated:
+            return Response(
+                fail(
+                    "PERMISSION_DENIED",
+                    "로그인이 필요합니다.",
+                    status.HTTP_403_FORBIDDEN,
+                ),
+                status=status.HTTP_403_FORBIDDEN,
             )
 
         projects = (
@@ -82,9 +117,32 @@ class Projects(APIView):
             .all()
             .order_by("-updated_at", "-pk")
         )
+
+        if joined or owned:
+            projects = projects.filter(
+                members__user=request.user,
+                members__status=Member.Status.JOINED,
+                members__is_leader=owned,
+            ).distinct()
+
+        if request.user.is_authenticated:
+            projects = projects.prefetch_related(
+                Prefetch(
+                    "members",
+                    queryset=Member.objects.filter(
+                        user=request.user,
+                        status=Member.Status.JOINED,
+                    ).order_by("-is_leader"),
+                    to_attr="request_user_memberships",
+                )
+            )
+
         count = projects.count()
         projects = projects[start : start + limit]
-        serializer = ProjectSerializer(projects, many=True)
+        serializer = ProjectSerializer(
+            projects,
+            many=True,
+        )
         return Response(
             success(serializer.data, pagination_detail(start, limit, count)),
             status=status.HTTP_200_OK,
@@ -125,12 +183,13 @@ class Projects(APIView):
                     tech_stack=data.get("tech_stack", []),
                     used_open_source=data.get("used_open_source", []),
                 )
-                Member.objects.create(
+                leader_member = Member.objects.create(
                     project=project,
                     user=request.user,
                     is_leader=True,
                     status=Member.Status.JOINED,
                 )
+                project.request_user_memberships = [leader_member]
                 if repository_url:
                     repository_name, full_name = parse_repository_identity(
                         repository_url
@@ -197,6 +256,9 @@ class ProjectDetail(APIView):
         )
         can_view_members = current_member is not None
         can_edit = can_view_members and current_member.is_leader
+        project.request_user_memberships = (
+            [current_member] if current_member is not None else []
+        )
         serializer = ProjectDetailSerializer(
             project,
             context={
