@@ -186,6 +186,14 @@ export default function ProjectDetailPage() {
           <Button variant={"outline"} onClick={() => navigate("/projects")}>
             목록으로
           </Button>
+          {project.canEdit && (
+            <Button
+              bg={"smu.blue"}
+              onClick={() => navigate(`/projects/${project.id}/edit`)}
+            >
+              프로젝트 수정
+            </Button>
+          )}
         </HStack>
 
         <Box
@@ -215,10 +223,7 @@ export default function ProjectDetailPage() {
 
           <SimpleGrid columns={{ base: 1, md: 4 }} gap={3} mb={5}>
             <Stat label="프로젝트 ID" value={`${project.id}`} />
-            <Stat
-              label="팀원"
-              value={`${project.memberCount}/${project.maxMembers}명`}
-            />
+            <Stat label="팀원" value={`${project.memberCount}명`} />
             <Stat
               label="생성일"
               value={formatDateTimeKST(project.createdAt)}
@@ -271,7 +276,7 @@ export default function ProjectDetailPage() {
                 팀원 현황
               </Text>
               <Text fontSize={"sm"} color={"smu.darkGray"}>
-                현재 {project.memberCount}/{project.maxMembers}명이 참여 중입니다.
+                현재 {project.memberCount}명이 참여 중입니다.
               </Text>
             </Box>
           </HStack>

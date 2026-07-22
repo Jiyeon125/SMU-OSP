@@ -161,7 +161,12 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
             "프로젝트명",
             allow_newlines=False,
         )
-        if Project.objects.filter(name=name).exists():
+        projects_with_same_name = Project.objects.filter(name=name)
+        if self.instance:
+            projects_with_same_name = projects_with_same_name.exclude(
+                pk=self.instance.pk
+            )
+        if projects_with_same_name.exists():
             raise serializers.ValidationError(
                 {"name": "이미 등록된 프로젝트명입니다."}
             )
@@ -246,6 +251,15 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
         return value
 
 
+class ProjectUpdateSerializer(ProjectCreateSerializer):
+    status = serializers.ChoiceField(
+        choices=Project.Status.choices,
+        error_messages={"invalid_choice": "프로젝트 상태를 확인해주세요."},
+    )
+    class Meta(ProjectCreateSerializer.Meta):
+        fields = ProjectCreateSerializer.Meta.fields + ("status",)
+
+
 class ProjectSerializer(serializers.ModelSerializer):
     demoUrl = serializers.URLField(source="demo_url", allow_null=True)
     presentationUrl = serializers.URLField(
@@ -310,12 +324,14 @@ class ProjectMemberSerializer(serializers.ModelSerializer):
 class ProjectDetailSerializer(ProjectSerializer):
     memberCount = serializers.SerializerMethodField()
     canViewMembers = serializers.SerializerMethodField()
+    canEdit = serializers.SerializerMethodField()
     members = serializers.SerializerMethodField()
 
     class Meta(ProjectSerializer.Meta):
         fields = ProjectSerializer.Meta.fields + (
             "memberCount",
             "canViewMembers",
+            "canEdit",
             "members",
         )
 
@@ -324,6 +340,9 @@ class ProjectDetailSerializer(ProjectSerializer):
 
     def get_canViewMembers(self, obj):
         return bool(self.context.get("can_view_members", False))
+
+    def get_canEdit(self, obj):
+        return bool(self.context.get("can_edit", False))
 
     def get_members(self, obj):
         if not self.get_canViewMembers(obj):
