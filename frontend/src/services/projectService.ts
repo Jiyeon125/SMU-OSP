@@ -1,13 +1,16 @@
 import axios from "axios";
 import {
   createProject as createProjectApi,
+  deleteProjectMembership,
   getProject as getProjectApi,
+  getProjectMemberships,
   getProjects,
   updateProject as updateProjectApi,
 } from "../api";
 import { ApiResponse, ERROR_CODES, PaginationDetail } from "../types/response";
 import {
   Project,
+  ProjectApplicationHistory,
   ProjectDetail,
   ProjectInput,
   ProjectUpdateInput,
@@ -63,6 +66,39 @@ export async function getProject(id: string): Promise<ApiResponse<ProjectDetail>
       e,
       "프로젝트 조회 중 오류가 발생했습니다."
     );
+  }
+}
+
+export async function listProjectApplications(): Promise<
+  ApiResponse<ProjectApplicationHistory[]>
+> {
+  try {
+    return await getProjectMemberships();
+  } catch (e) {
+    return toApiResponse<ProjectApplicationHistory[]>(
+      e,
+      "프로젝트 신청 내역 조회 중 오류가 발생했습니다."
+    );
+  }
+}
+
+export async function cancelProjectApplication(
+  projectId: number
+): Promise<ApiResponse<null>> {
+  try {
+    return await deleteProjectMembership(projectId);
+  } catch (e) {
+    return toApiResponse<null>(e, "프로젝트 신청 취소 중 오류가 발생했습니다.");
+  }
+}
+
+export async function leaveProject(
+  projectId: number
+): Promise<ApiResponse<null>> {
+  try {
+    return await deleteProjectMembership(projectId);
+  } catch (e) {
+    return toApiResponse<null>(e, "프로젝트 탈퇴 중 오류가 발생했습니다.");
   }
 }
 

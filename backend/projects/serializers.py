@@ -331,6 +331,29 @@ class ProjectMemberSerializer(serializers.ModelSerializer):
         return "LEADER" if obj.is_leader else "MEMBER"
 
 
+class ProjectMembershipHistorySerializer(serializers.ModelSerializer):
+    projectId = serializers.IntegerField(source="project_id")
+    projectName = serializers.CharField(source="project.name")
+    projectStatus = serializers.CharField(source="project.status")
+    userId = serializers.IntegerField(source="user_id", allow_null=True)
+    createdAt = serializers.DateTimeField(source="created_at")
+    updatedAt = serializers.DateTimeField(source="updated_at")
+
+    class Meta:
+        model = Member
+        fields = (
+            "projectId",
+            "projectName",
+            "projectStatus",
+            "id",
+            "userId",
+            "status",
+            "description",
+            "createdAt",
+            "updatedAt",
+        )
+
+
 class ProjectDetailSerializer(ProjectSerializer):
     memberCount = serializers.SerializerMethodField()
     canViewMembers = serializers.SerializerMethodField()

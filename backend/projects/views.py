@@ -1,5 +1,6 @@
 from urllib.parse import urlparse
 
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Exists, OuterRef, Prefetch
 from rest_framework import status
@@ -11,6 +12,7 @@ from .models import Member, Project, Repository
 from .serializers import (
     ProjectCreateSerializer,
     ProjectDetailSerializer,
+    ProjectMembershipHistorySerializer,
     ProjectSerializer,
     ProjectUpdateSerializer,
 )
@@ -353,6 +355,92 @@ class ProjectDetail(APIView):
             success(None),
             status=status.HTTP_200_OK,
         )
+
+
+class ProjectMemberships(APIView):
+    def get(self, request):
+        if not request.user.is_authenticated:
+            return Response(
+                fail(
+                    "PERMISSION_DENIED",
+                    "로그인이 필요합니다.",
+                    status.HTTP_403_FORBIDDEN,
+                ),
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        memberships = (
+            Member.objects.select_related("project")
+            .filter(user=request.user, is_leader=False)
+            .order_by("-created_at", "-pk")
+        )
+        serializer = ProjectMembershipHistorySerializer(memberships, many=True)
+        return Response(success(serializer.data), status=status.HTTP_200_OK)
+
+
+class ProjectMembers(APIView):
+    def delete(self, request, pk):
+        if not request.user.is_authenticated:
+            return Response(
+                fail(
+                    "PERMISSION_DENIED",
+                    "로그인이 필요합니다.",
+                    status.HTTP_403_FORBIDDEN,
+                ),
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if not Project.objects.filter(pk=pk).exists():
+            return Response(
+                fail(
+                    "PROJECT_NOT_FOUND",
+                    f"id={pk}에 해당하는 프로젝트를 찾을 수 없습니다.",
+                    status.HTTP_404_NOT_FOUND,
+                ),
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        with transaction.atomic():
+            membership = (
+                Member.objects.select_for_update()
+                .filter(project_id=pk, user=request.user)
+                .order_by("-is_leader", "-created_at", "-pk")
+                .first()
+            )
+
+            if membership is None:
+                return Response(
+                    fail(
+                        "MEMBERSHIP_NOT_FOUND",
+                        "해당 프로젝트의 참여 또는 신청 내역을 찾을 수 없습니다.",
+                        status.HTTP_404_NOT_FOUND,
+                    ),
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            try:
+                membership.transition_to()
+            except ValidationError as error:
+                response_status = (
+                    "PERMISSION_DENIED"
+                    if error.code == "leader_protected"
+                    else "INVALID_MEMBER_STATUS"
+                )
+                return Response(
+                    fail(
+                        response_status,
+                        error.message,
+                        status.HTTP_403_FORBIDDEN
+                        if response_status == "PERMISSION_DENIED"
+                        else status.HTTP_400_BAD_REQUEST,
+                    ),
+                    status=status.HTTP_403_FORBIDDEN
+                    if response_status == "PERMISSION_DENIED"
+                    else status.HTTP_400_BAD_REQUEST,
+                )
+            membership.save(update_fields=("status", "updated_at"))
+
+        return Response(success(None), status=status.HTTP_200_OK)
 
 
 def update_project_repository(project, repository_url):

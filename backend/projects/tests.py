@@ -2,6 +2,7 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -700,6 +701,207 @@ class ProjectApiTests(TestCase):
             "joined는 true 또는 false여야 합니다.",
         )
         self.assertEqual(body["detail"]["httpStatus"], 400)
+
+    def test_project_membership_history_requires_login(self):
+        response = self.client.get("/api/v1/projects/members")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["status"], "PERMISSION_DENIED")
+
+    def test_project_membership_history_returns_all_attempts_latest_first(self):
+        application_project = Project.objects.create(
+            name="Application Project",
+            description="Application history target",
+        )
+        declined = Member.objects.create(
+            project=application_project,
+            user=self.user,
+            status=Member.Status.DECLINED,
+            description="모집 인원 마감",
+        )
+        pending = Member.objects.create(
+            project=application_project,
+            user=self.user,
+            status=Member.Status.PENDING,
+        )
+        other_user = get_user_model().objects.create_user(
+            username="other-applicant",
+            password="password",
+            github_email="other-applicant@sookmyung.ac.kr",
+            name="다른 신청자",
+            student_id=220,
+            major="컴퓨터과학",
+        )
+        Member.objects.create(
+            project=application_project,
+            user=other_user,
+            status=Member.Status.PENDING,
+        )
+        older_time = timezone.now() - timedelta(days=1)
+        Member.objects.filter(pk=declined.pk).update(created_at=older_time)
+        self.client.force_login(self.user)
+
+        response = self.client.get("/api/v1/projects/members")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "SUCCESS")
+        self.assertIsNone(body["detail"])
+        self.assertEqual(
+            [membership["id"] for membership in body["data"]],
+            [pending.pk, declined.pk],
+        )
+        self.assertEqual(
+            [membership["status"] for membership in body["data"]],
+            [Member.Status.PENDING, Member.Status.DECLINED],
+        )
+        self.assertEqual(body["data"][0]["projectId"], application_project.pk)
+        self.assertEqual(body["data"][0]["projectName"], "Application Project")
+        self.assertEqual(body["data"][0]["projectStatus"], Project.Status.ACTIVE)
+        self.assertEqual(body["data"][0]["userId"], self.user.pk)
+        self.assertIn("createdAt", body["data"][0])
+        self.assertIn("updatedAt", body["data"][0])
+
+    def test_project_membership_history_returns_empty_list(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get("/api/v1/projects/members")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"], [])
+
+    def test_member_transition_to_changes_status_without_saving(self):
+        membership = Member.objects.create(
+            project=self.project,
+            user=self.user,
+            status=Member.Status.PENDING,
+        )
+
+        membership.transition_to(Member.Status.CANCELED)
+
+        self.assertEqual(membership.status, Member.Status.CANCELED)
+        membership.refresh_from_db()
+        self.assertEqual(membership.status, Member.Status.PENDING)
+
+    def test_member_transition_to_rejects_invalid_status(self):
+        membership = Member.objects.create(
+            project=self.project,
+            user=self.user,
+            status=Member.Status.DECLINED,
+        )
+
+        with self.assertRaises(ValidationError):
+            membership.transition_to(Member.Status.LEFT)
+
+    def test_pending_project_membership_can_be_canceled(self):
+        application_project = Project.objects.create(
+            name="Pending Application Project",
+            description="Pending application project description",
+        )
+        pending_member = Member.objects.create(
+            project=application_project,
+            user=self.user,
+            status=Member.Status.PENDING,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.delete(
+            f"/api/v1/projects/{application_project.pk}/members"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "SUCCESS")
+        self.assertIsNone(response.json()["data"])
+        pending_member.refresh_from_db()
+        self.assertEqual(pending_member.status, Member.Status.CANCELED)
+
+    def test_joined_project_membership_can_be_left(self):
+        joined_project = Project.objects.create(
+            name="Joined Project",
+            description="Joined project description",
+        )
+        joined_member = Member.objects.create(
+            project=joined_project,
+            user=self.user,
+            status=Member.Status.JOINED,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.delete(
+            f"/api/v1/projects/{joined_project.pk}/members"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        joined_member.refresh_from_db()
+        self.assertEqual(joined_member.status, Member.Status.LEFT)
+
+    def test_project_leader_cannot_leave(self):
+        self.client.force_login(self.user)
+
+        response = self.client.delete(f"/api/v1/projects/{self.project.pk}/members")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["status"], "PERMISSION_DENIED")
+        self.member.refresh_from_db()
+        self.assertEqual(self.member.status, Member.Status.JOINED)
+
+    def test_project_leader_cannot_cancel_later_pending_membership(self):
+        pending_member = Member.objects.create(
+            project=self.project,
+            user=self.user,
+            status=Member.Status.PENDING,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.delete(f"/api/v1/projects/{self.project.pk}/members")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["status"], "PERMISSION_DENIED")
+        pending_member.refresh_from_db()
+        self.assertEqual(pending_member.status, Member.Status.PENDING)
+
+    def test_project_membership_cancel_rejects_inactive_status(self):
+        declined_project = Project.objects.create(
+            name="Declined Application Project",
+            description="Declined application project description",
+        )
+        declined_member = Member.objects.create(
+            project=declined_project,
+            user=self.user,
+            status=Member.Status.DECLINED,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.delete(
+            f"/api/v1/projects/{declined_project.pk}/members"
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["status"], "INVALID_MEMBER_STATUS")
+        declined_member.refresh_from_db()
+        self.assertEqual(declined_member.status, Member.Status.DECLINED)
+
+    def test_project_membership_cancel_requires_login(self):
+        response = self.client.delete(f"/api/v1/projects/{self.project.pk}/members")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["status"], "PERMISSION_DENIED")
+
+    def test_project_membership_cancel_rejects_user_without_membership(self):
+        other_user = get_user_model().objects.create_user(
+            username="non-member",
+            password="password",
+            github_email="non-member@sookmyung.ac.kr",
+            name="비회원",
+            student_id=221,
+            major="컴퓨터과학",
+        )
+        self.client.force_login(other_user)
+
+        response = self.client.delete(f"/api/v1/projects/{self.project.pk}/members")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["status"], "MEMBERSHIP_NOT_FOUND")
 
     def create_projects_for_pagination(self, total):
         self.project.delete()

@@ -1,5 +1,11 @@
 export type ProjectStatus = "ACTIVE" | "FINISHED" | "INACTIVE" | "DELETED";
 export type ProjectMemberRole = "LEADER" | "MEMBER";
+export type ProjectApplicationStatus =
+  | "PENDING"
+  | "JOINED"
+  | "DECLINED"
+  | "LEFT"
+  | "CANCELED";
 
 export interface ProjectDetailMember {
   id: number;
@@ -49,6 +55,18 @@ export interface ProjectDetail extends Project {
   canViewMembers: boolean;
   canEdit: boolean;
   members: ProjectDetailMember[] | null;
+}
+
+export interface ProjectApplicationHistory {
+  projectId: number;
+  projectName: string;
+  projectStatus: ProjectStatus;
+  id: number;
+  userId: number | null;
+  status: ProjectApplicationStatus;
+  description?: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ProjectInput {
