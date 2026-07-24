@@ -379,6 +379,57 @@ class ProjectMemberships(APIView):
 
 
 class ProjectMembers(APIView):
+    def post(self, request, pk):
+        if not request.user.is_authenticated:
+            return Response(
+                fail(
+                    "PERMISSION_DENIED",
+                    "로그인이 필요합니다.",
+                    status.HTTP_403_FORBIDDEN,
+                ),
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            project = Project.objects.get(pk=pk)
+        except Project.DoesNotExist:
+            return Response(
+                fail(
+                    "PROJECT_NOT_FOUND",
+                    f"id={pk}에 해당하는 프로젝트를 찾을 수 없습니다.",
+                    status.HTTP_404_NOT_FOUND,
+                ),
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        memberships = list(
+            Member.objects.filter(
+                project=project,
+                user=request.user,
+            ).order_by("-created_at", "-pk")
+        )
+        try:
+            project.validate_membership_application(memberships)
+        except ValidationError as error:
+            return Response(
+                fail(
+                    str(error.code).upper(),
+                    error.message,
+                    status.HTTP_400_BAD_REQUEST,
+                ),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        Member.objects.create(
+            project=project,
+            user=request.user,
+            status=Member.Status.PENDING,
+        )
+        return Response(
+            success(None),
+            status=status.HTTP_201_CREATED,
+        )
+
     def delete(self, request, pk):
         if not request.user.is_authenticated:
             return Response(

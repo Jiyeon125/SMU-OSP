@@ -123,6 +123,8 @@ class ProjectApiTests(TestCase):
         self.assertEqual(body["data"]["memberCount"], 1)
         self.assertFalse(body["data"]["canViewMembers"])
         self.assertFalse(body["data"]["canEdit"])
+        self.assertNotIn("canApply", body["data"])
+        self.assertNotIn("applicationStatus", body["data"])
         self.assertIsNone(body["data"]["members"])
 
     def test_project_member_can_view_joined_member_details(self):
@@ -704,6 +706,159 @@ class ProjectApiTests(TestCase):
 
     def test_project_membership_history_requires_login(self):
         response = self.client.get("/api/v1/projects/members")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["status"], "PERMISSION_DENIED")
+
+    def test_project_membership_application_creates_pending_history(self):
+        applicant = get_user_model().objects.create_user(
+            username="applicant",
+            password="password",
+            github_email="applicant@sookmyung.ac.kr",
+            name="신청자",
+            student_id=222,
+            major="컴퓨터과학",
+        )
+        self.client.force_login(applicant)
+
+        response = self.client.post(f"/api/v1/projects/{self.project.pk}/members")
+
+        self.assertEqual(response.status_code, 201)
+        membership = Member.objects.get(
+            project=self.project,
+            user=applicant,
+            is_leader=False,
+        )
+        self.assertEqual(membership.status, Member.Status.PENDING)
+        self.assertIsNone(response.json()["data"])
+
+    def test_project_membership_application_rejects_active_membership(self):
+        applicant = get_user_model().objects.create_user(
+            username="active-applicant",
+            password="password",
+            github_email="active-applicant@sookmyung.ac.kr",
+            name="신청중 사용자",
+            student_id=223,
+            major="컴퓨터과학",
+        )
+        Member.objects.create(
+            project=self.project,
+            user=applicant,
+            status=Member.Status.PENDING,
+        )
+        self.client.force_login(applicant)
+
+        response = self.client.post(f"/api/v1/projects/{self.project.pk}/members")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["status"], "MEMBERSHIP_ALREADY_EXISTS")
+        self.assertEqual(
+            Member.objects.filter(project=self.project, user=applicant).count(),
+            1,
+        )
+
+    def test_project_membership_application_rejects_full_project(self):
+        applicant = get_user_model().objects.create_user(
+            username="capacity-applicant",
+            password="password",
+            github_email="capacity-applicant@sookmyung.ac.kr",
+            name="정원 초과 신청자",
+            student_id=225,
+            major="컴퓨터과학",
+        )
+        for _ in range(self.project.max_members - 1):
+            Member.objects.create(
+                project=self.project,
+                status=Member.Status.JOINED,
+            )
+        self.client.force_login(applicant)
+
+        application_response = self.client.post(
+            f"/api/v1/projects/{self.project.pk}/members"
+        )
+
+        self.assertEqual(application_response.status_code, 400)
+        self.assertEqual(
+            application_response.json()["status"],
+            "PROJECT_CAPACITY_REACHED",
+        )
+        self.assertFalse(
+            Member.objects.filter(project=self.project, user=applicant).exists()
+        )
+
+    def test_project_leader_cannot_apply_to_own_project(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(f"/api/v1/projects/{self.project.pk}/members")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["status"], "MEMBERSHIP_ALREADY_EXISTS")
+        self.assertEqual(
+            Member.objects.filter(project=self.project, user=self.user).count(),
+            1,
+        )
+
+    def test_project_membership_application_allows_five_reapplications(self):
+        applicant = get_user_model().objects.create_user(
+            username="returning-applicant",
+            password="password",
+            github_email="returning-applicant@sookmyung.ac.kr",
+            name="재신청자",
+            student_id=224,
+            major="컴퓨터과학",
+        )
+        for status_value in (
+            Member.Status.DECLINED,
+            Member.Status.CANCELED,
+            Member.Status.LEFT,
+            Member.Status.DECLINED,
+            Member.Status.CANCELED,
+        ):
+            Member.objects.create(
+                project=self.project,
+                user=applicant,
+                status=status_value,
+            )
+        self.client.force_login(applicant)
+
+        response = self.client.post(f"/api/v1/projects/{self.project.pk}/members")
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            Member.objects.filter(project=self.project, user=applicant).count(),
+            6,
+        )
+        Member.objects.filter(
+            project=self.project,
+            user=applicant,
+            status=Member.Status.PENDING,
+        ).update(status=Member.Status.DECLINED)
+
+        response = self.client.post(f"/api/v1/projects/{self.project.pk}/members")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()["status"], "MEMBERSHIP_REAPPLICATION_LIMIT"
+        )
+
+    def test_project_membership_application_rejects_invalid_project(self):
+        self.client.force_login(self.user)
+
+        missing_response = self.client.post("/api/v1/projects/999999/members")
+        self.project.status = Project.Status.FINISHED
+        self.project.save(update_fields=("status", "updated_at"))
+        inactive_response = self.client.post(
+            f"/api/v1/projects/{self.project.pk}/members"
+        )
+
+        self.assertEqual(missing_response.status_code, 404)
+        self.assertEqual(inactive_response.status_code, 400)
+        self.assertEqual(
+            inactive_response.json()["status"], "INVALID_PROJECT_STATUS"
+        )
+
+    def test_project_membership_application_requires_login(self):
+        response = self.client.post(f"/api/v1/projects/{self.project.pk}/members")
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["status"], "PERMISSION_DENIED")

@@ -1,3 +1,5 @@
+from typing import Final
+
 from django.core.exceptions import ValidationError
 from django.conf import settings
 from django.db import models
@@ -43,6 +45,8 @@ class Repository(CommonModel):
 
 
 class Project(CommonModel):
+    MAX_REAPPLICATIONS: Final[int] = 5
+
     class Status(models.TextChoices):
         ACTIVE = "ACTIVE", "Active"
         FINISHED = "FINISHED", "Finished"
@@ -61,6 +65,40 @@ class Project(CommonModel):
         default=Status.ACTIVE,
     )
     max_members = models.PositiveIntegerField(default=get_default_max_members)
+
+    def has_available_member_slot(self):
+        joined_members = getattr(self, "joined_members", None)
+        joined_count = (
+            len(joined_members)
+            if joined_members is not None
+            else self.members.filter(status=Member.Status.JOINED).count()
+        )
+        return joined_count < self.max_members
+
+    def validate_membership_application(self, memberships):
+        if self.status != self.Status.ACTIVE:
+            raise ValidationError(
+                "진행 중인 프로젝트에만 참가 신청할 수 있습니다.",
+                code="invalid_project_status",
+            )
+        if any(
+            membership.status in (Member.Status.PENDING, Member.Status.JOINED)
+            for membership in memberships
+        ):
+            raise ValidationError(
+                "이미 참가 신청 중이거나 참여 중인 프로젝트입니다.",
+                code="membership_already_exists",
+            )
+        if len(memberships) > self.MAX_REAPPLICATIONS:
+            raise ValidationError(
+                f"재신청 가능 횟수 {self.MAX_REAPPLICATIONS}회를 모두 사용했습니다.",
+                code="membership_reapplication_limit",
+            )
+        if not self.has_available_member_slot():
+            raise ValidationError(
+                "프로젝트 정원이 가득 차 참가 신청할 수 없습니다.",
+                code="project_capacity_reached",
+            )
 
     def set_status(self, status):
         allowed_transitions = {

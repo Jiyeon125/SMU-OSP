@@ -4,13 +4,21 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import ProjectLeaveDialog from "../components/ProjectLeaveDialog";
 import { Button } from "../components/ui/button";
-import { getProject, leaveProject } from "../services/projectService";
+import useUser from "../lib/useUser";
+import {
+  applyToProject,
+  getProject,
+  leaveProject,
+  listProjectApplications,
+} from "../services/projectService";
 import {
   PROJECT_MEMBER_ROLE_LABEL,
   PROJECT_STATUS_LABEL,
 } from "../types/project";
 import type { ProjectDetailMember } from "../types/project";
 import { formatDateTimeKST } from "../utils/date";
+
+const MAX_REAPPLICATIONS = 5;
 
 function Section({
   title,
@@ -138,13 +146,21 @@ export default function ProjectDetailPage() {
   const { id = "" } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { isLoggedIn, userLoading } = useUser();
   const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
   const [leaveMessage, setLeaveMessage] = useState("");
+  const [applicationMessage, setApplicationMessage] = useState("");
 
   const projectQuery = useQuery({
     queryKey: ["project", id],
     queryFn: () => getProject(id),
     enabled: !!id,
+  });
+  const applicationHistoryQuery = useQuery({
+    queryKey: ["project-application-history"],
+    queryFn: listProjectApplications,
+    enabled: !userLoading && isLoggedIn,
+    retry: false,
   });
 
   const leaveMutation = useMutation({
@@ -159,6 +175,23 @@ export default function ProjectDetailPage() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["project", id] }),
         queryClient.invalidateQueries({ queryKey: ["projects"] }),
+        queryClient.invalidateQueries({
+          queryKey: ["project-application-history"],
+        }),
+      ]);
+    },
+  });
+
+  const applicationMutation = useMutation({
+    mutationFn: (projectId: number) => applyToProject(projectId),
+    onSuccess: async (response) => {
+      if (response.status !== "SUCCESS") {
+        setApplicationMessage(response.detail.message);
+        return;
+      }
+      setApplicationMessage("참가 신청이 완료되어 승인 대기 중입니다.");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["project", id] }),
         queryClient.invalidateQueries({
           queryKey: ["project-application-history"],
         }),
@@ -200,11 +233,38 @@ export default function ProjectDetailPage() {
   }
 
   const project = resp.data;
+  const applicationHistory =
+    applicationHistoryQuery.data?.status === "SUCCESS"
+      ? applicationHistoryQuery.data.data.filter(
+          (application) => application.projectId === project.id
+        )
+      : [];
+  const hasLoadedApplicationHistory =
+    applicationHistoryQuery.data?.status === "SUCCESS";
+  const latestApplication = applicationHistory[0];
+  const hasActiveApplication =
+    latestApplication?.status === "PENDING" ||
+    latestApplication?.status === "JOINED";
+  const canApply =
+    isLoggedIn &&
+    hasLoadedApplicationHistory &&
+    project.status === "ACTIVE" &&
+    project.membershipRole == null &&
+    !hasActiveApplication &&
+    applicationHistory.length <= MAX_REAPPLICATIONS &&
+    project.memberCount < project.maxMembers;
   const repositoryName = project.repository?.fullName;
   const repositoryUrl = project.repository?.htmlUrl;
   const leave = () => {
     setLeaveMessage("");
     leaveMutation.mutate(project.id);
+  };
+
+  const apply = () => {
+    setApplicationMessage("");
+    if (window.confirm("이 프로젝트에 참가 신청하시겠습니까?")) {
+      applicationMutation.mutate(project.id);
+    }
   };
 
   return (
@@ -223,6 +283,15 @@ export default function ProjectDetailPage() {
                 onClick={() => setLeaveDialogOpen(true)}
               >
                 {leaveMutation.isPending ? "탈퇴 중..." : "프로젝트 탈퇴"}
+              </Button>
+            )}
+            {canApply && (
+              <Button
+                bg={"smu.blue"}
+                disabled={applicationMutation.isPending}
+                onClick={apply}
+              >
+                {applicationMutation.isPending ? "신청 중..." : "참가 신청"}
               </Button>
             )}
             {project.canEdit && (
@@ -259,6 +328,31 @@ export default function ProjectDetailPage() {
           onConfirm={leave}
           isPending={leaveMutation.isPending}
         />
+
+        {(applicationMessage || latestApplication?.status === "PENDING") && (
+          <Box
+            role={
+              applicationMessage &&
+              applicationMutation.data?.status !== "SUCCESS"
+                ? "alert"
+                : "status"
+            }
+            p={3}
+            borderWidth={1}
+            borderColor={
+              applicationMessage &&
+              applicationMutation.data?.status !== "SUCCESS"
+                ? "smu.orange"
+                : "smu.lightBlue"
+            }
+            borderRadius={"md"}
+            bg={"white"}
+          >
+            <Text fontSize={"sm"}>
+              {applicationMessage || "참가 신청 승인 대기 중입니다."}
+            </Text>
+          </Box>
+        )}
 
         <Box
           p={6}
