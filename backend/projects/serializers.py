@@ -308,7 +308,7 @@ class ProjectMemberSerializer(serializers.ModelSerializer):
     userId = serializers.IntegerField(source="user_id", allow_null=True)
     name = serializers.SerializerMethodField()
     role = serializers.SerializerMethodField()
-    joinedAt = serializers.DateTimeField(source="created_at")
+    createdAt = serializers.DateTimeField(source="created_at")
 
     class Meta:
         model = Member
@@ -319,7 +319,7 @@ class ProjectMemberSerializer(serializers.ModelSerializer):
             "role",
             "status",
             "description",
-            "joinedAt",
+            "createdAt",
         )
 
     def get_name(self, obj):
@@ -329,6 +329,31 @@ class ProjectMemberSerializer(serializers.ModelSerializer):
 
     def get_role(self, obj):
         return "LEADER" if obj.is_leader else "MEMBER"
+
+
+class ProjectMemberUpdateSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(
+        choices=(
+            Member.Status.DECLINED,
+            Member.Status.JOINED,
+            Member.Status.LEFT,
+        )
+    )
+    description = serializers.CharField(
+        max_length=255,
+        allow_blank=True,
+        allow_null=True,
+        required=False,
+    )
+
+
+class ProjectMemberDescriptionSerializer(serializers.Serializer):
+    description = serializers.CharField(
+        max_length=255,
+        allow_blank=True,
+        allow_null=True,
+        required=False,
+    )
 
 
 class ProjectMembershipHistorySerializer(serializers.ModelSerializer):
