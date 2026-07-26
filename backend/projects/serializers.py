@@ -306,8 +306,10 @@ class ProjectSerializer(serializers.ModelSerializer):
 
 class ProjectMemberSerializer(serializers.ModelSerializer):
     userId = serializers.IntegerField(source="user_id", allow_null=True)
+    username = serializers.CharField(source="user.username", allow_null=True)
     name = serializers.SerializerMethodField()
     role = serializers.SerializerMethodField()
+    joinedAt = serializers.DateTimeField(source="joined_at", allow_null=True)
     createdAt = serializers.DateTimeField(source="created_at")
 
     class Meta:
@@ -315,10 +317,12 @@ class ProjectMemberSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "userId",
+            "username",
             "name",
             "role",
             "status",
             "description",
+            "joinedAt",
             "createdAt",
         )
 
@@ -361,6 +365,7 @@ class ProjectMembershipHistorySerializer(serializers.ModelSerializer):
     projectName = serializers.CharField(source="project.name")
     projectStatus = serializers.CharField(source="project.status")
     userId = serializers.IntegerField(source="user_id", allow_null=True)
+    joinedAt = serializers.DateTimeField(source="joined_at", allow_null=True)
     createdAt = serializers.DateTimeField(source="created_at")
     updatedAt = serializers.DateTimeField(source="updated_at")
 
@@ -374,6 +379,7 @@ class ProjectMembershipHistorySerializer(serializers.ModelSerializer):
             "userId",
             "status",
             "description",
+            "joinedAt",
             "createdAt",
             "updatedAt",
         )

@@ -10,10 +10,12 @@ export type ProjectApplicationStatus =
 export interface ProjectDetailMember {
   id: number;
   userId?: number | null;
+  username?: string | null;
   name: string;
   role: ProjectMemberRole;
   status: ProjectApplicationStatus;
   description?: string | null;
+  joinedAt: string | null;
   createdAt: string;
 }
 
@@ -70,6 +72,7 @@ export interface ProjectApplicationHistory {
   userId: number | null;
   status: ProjectApplicationStatus;
   description?: string | null;
+  joinedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -1,4 +1,12 @@
-import { Box, HStack, SimpleGrid, Spinner, Text, VStack } from "@chakra-ui/react";
+import {
+  Box,
+  HStack,
+  SimpleGrid,
+  Spinner,
+  Text,
+  Textarea,
+  VStack,
+} from "@chakra-ui/react";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
@@ -7,10 +15,23 @@ import ProjectMemberManagementDialog from "../components/ProjectMemberManagement
 import { Button } from "../components/ui/button";
 import useUser from "../lib/useUser";
 import {
+  DialogActionTrigger,
+  DialogBody,
+  DialogCloseTrigger,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogRoot,
+  DialogTitle,
+} from "../components/ui/dialog";
+import {
   applyToProject,
   getProject,
   leaveProject,
   listProjectApplications,
+  listProjectMembers,
+  removeProjectMember,
 } from "../services/projectService";
 import {
   PROJECT_MEMBER_ROLE_LABEL,
@@ -81,7 +102,17 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function MemberRow({ member }: { member: ProjectDetailMember }) {
+function MemberRow({
+  member,
+  canRemove,
+  removing,
+  onRemove,
+}: {
+  member: ProjectDetailMember;
+  canRemove: boolean;
+  removing: boolean;
+  onRemove: (member: ProjectDetailMember) => void;
+}) {
   return (
     <HStack
       p={3}
@@ -93,25 +124,135 @@ function MemberRow({ member }: { member: ProjectDetailMember }) {
       flexWrap={"wrap"}
       gap={3}
     >
-      <Box>
-        <Text fontWeight={"bold"} color={"smu.blue"}>
-          {member.name}
-        </Text>
-        {member.description && (
-          <Text fontSize={"sm"} color={"smu.darkGray"} mt={1}>
-            {member.description}
+      <VStack alignItems="stretch" gap={1} w="full">
+        <HStack justifyContent="space-between" gap={3} minH="32px">
+          <HStack gap={2}>
+            {member.username ? (
+              <RouterLink to={`/@${member.username}`}>
+                <Text
+                  fontWeight="bold"
+                  color="smu.blue"
+                  textDecoration="underline"
+                >
+                  {member.name}
+                </Text>
+              </RouterLink>
+            ) : (
+              <Text fontWeight="bold" color="smu.blue">
+                {member.name}
+              </Text>
+            )}
+            <Pill
+              bg={member.role === "LEADER" ? "smu.lightBlue" : "smu.gray"}
+              color={member.role === "LEADER" ? "white" : "smu.darkGray"}
+            >
+              {PROJECT_MEMBER_ROLE_LABEL[member.role]}
+            </Pill>
+          </HStack>
+          {canRemove && (
+            <Button
+              variant="outline"
+              colorPalette="red"
+              borderColor="red.500"
+              color="red.600"
+              bg="white"
+              size="xs"
+              disabled={removing}
+              onClick={() => onRemove(member)}
+            >
+              내보내기
+            </Button>
+          )}
+        </HStack>
+        {member.joinedAt && (
+          <Text fontSize={"xs"} color={"smu.darkGray"}>
+            {formatDateTimeKST(member.joinedAt)} 참여
           </Text>
         )}
-      </Box>
-      <VStack alignItems={"flex-end"} gap={1}>
-        <Pill
-          bg={member.role === "LEADER" ? "smu.lightBlue" : "smu.gray"}
-          color={member.role === "LEADER" ? "white" : "smu.darkGray"}
-        >
-          {PROJECT_MEMBER_ROLE_LABEL[member.role]}
-        </Pill>
       </VStack>
     </HStack>
+  );
+}
+
+function ProjectMemberRemoveDialog({
+  member,
+  setMember,
+  onConfirm,
+  isPending,
+}: {
+  member: ProjectDetailMember | null;
+  setMember: (member: ProjectDetailMember | null) => void;
+  onConfirm: (description: string) => void;
+  isPending: boolean;
+}) {
+  const [description, setDescription] = useState("");
+  const [error, setError] = useState("");
+
+  const close = () => {
+    setMember(null);
+    setDescription("");
+    setError("");
+  };
+
+  const confirm = () => {
+    const value = description.trim();
+    if (!value) {
+      setError("내보내기 사유를 입력해주세요.");
+      return;
+    }
+    setError("");
+    onConfirm(value);
+  };
+
+  return (
+    <DialogRoot
+      open={!!member}
+      onOpenChange={(event) => !event.open && close()}
+      placement="center"
+      role="alertdialog"
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>팀원 내보내기</DialogTitle>
+        </DialogHeader>
+        <DialogBody>
+          <DialogDescription>
+            {member?.name}님을 정말로 프로젝트에서 내보내시겠습니까?
+          </DialogDescription>
+          <Textarea
+            mt={4}
+            value={description}
+            maxLength={255}
+            placeholder="내보내기 사유 (필수, 255자 이내)"
+            aria-label="내보내기 사유"
+            required
+            onChange={(event) => setDescription(event.target.value)}
+          />
+          {error && (
+            <Text role="alert" mt={1} fontSize="sm" color="red.600">
+              {error}
+            </Text>
+          )}
+          <Text mt={1} fontSize="xs" color="smu.darkGray" textAlign="right">
+            {description.length}/255
+          </Text>
+        </DialogBody>
+        <DialogFooter>
+          <DialogActionTrigger asChild>
+            <Button variant="outline">취소</Button>
+          </DialogActionTrigger>
+          <Button
+            colorPalette="red"
+            loading={isPending}
+            loadingText="내보내는 중"
+            onClick={confirm}
+          >
+            내보내기
+          </Button>
+        </DialogFooter>
+        <DialogCloseTrigger />
+      </DialogContent>
+    </DialogRoot>
   );
 }
 
@@ -147,6 +288,9 @@ export default function ProjectDetailPage() {
   const { isLoggedIn, userLoading } = useUser();
   const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
   const [memberManagementOpen, setMemberManagementOpen] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<ProjectDetailMember | null>(
+    null
+  );
   const [leaveMessage, setLeaveMessage] = useState("");
   const [applicationMessage, setApplicationMessage] = useState("");
 
@@ -160,6 +304,13 @@ export default function ProjectDetailPage() {
     queryFn: listProjectApplications,
     enabled: !userLoading && isLoggedIn,
     retry: false,
+  });
+  const managedProject =
+    projectQuery.data?.status === "SUCCESS" ? projectQuery.data.data : null;
+  const managedMembersQuery = useQuery({
+    queryKey: ["project-members", managedProject?.id, "manage"],
+    queryFn: () => listProjectMembers(managedProject!.id, true),
+    enabled: !!managedProject?.canEdit,
   });
 
   const leaveMutation = useMutation({
@@ -200,6 +351,32 @@ export default function ProjectDetailPage() {
         queryClient.invalidateQueries({
           queryKey: ["project-application-history"],
         }),
+      ]);
+    },
+  });
+
+  const removeMemberMutation = useMutation({
+    mutationFn: ({
+      projectId,
+      memberId,
+      description,
+    }: {
+      projectId: number;
+      memberId: number;
+      description: string;
+    }) => removeProjectMember(projectId, memberId, description),
+    onSuccess: async (response, { projectId }) => {
+      if (response.status !== "SUCCESS") {
+        window.alert(response.detail.message);
+        return;
+      }
+      setRemoveTarget(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["project", id] }),
+        queryClient.invalidateQueries({
+          queryKey: ["project-members", projectId],
+        }),
+        queryClient.invalidateQueries({ queryKey: ["projects"] }),
       ]);
     },
   });
@@ -258,6 +435,13 @@ export default function ProjectDetailPage() {
     !hasActiveApplication &&
     applicationHistory.length <= MAX_REAPPLICATIONS &&
     project.memberCount < project.maxMembers;
+  const managedMembersResponse = managedMembersQuery.data;
+  const pendingCount =
+    managedMembersResponse?.status === "SUCCESS"
+      ? managedMembersResponse.data.filter(
+           (member) => member.status === "PENDING"
+         ).length
+      : 0;
   const repositoryName = project.repository?.fullName;
   const repositoryUrl = project.repository?.htmlUrl;
   const leave = (description: string) => {
@@ -273,6 +457,15 @@ export default function ProjectDetailPage() {
     if (window.confirm("이 프로젝트에 참가 신청하시겠습니까?")) {
       applicationMutation.mutate(project.id);
     }
+  };
+
+  const removeMember = (description: string) => {
+    if (!removeTarget) return;
+    removeMemberMutation.mutate({
+      projectId: project.id,
+      memberId: removeTarget.id,
+      description,
+    });
   };
 
   return (
@@ -303,20 +496,12 @@ export default function ProjectDetailPage() {
               </Button>
             )}
             {project.canEdit && (
-              <>
-                <Button
-                  variant="outline"
-                  onClick={() => setMemberManagementOpen(true)}
-                >
-                  신청 현황 관리
-                </Button>
-                <Button
-                  bg={"smu.blue"}
-                  onClick={() => navigate(`/projects/${project.id}/edit`)}
-                >
-                  프로젝트 수정
-                </Button>
-              </>
+              <Button
+                bg={"smu.blue"}
+                onClick={() => navigate(`/projects/${project.id}/edit`)}
+              >
+                프로젝트 수정
+              </Button>
             )}
           </HStack>
         </HStack>
@@ -350,6 +535,14 @@ export default function ProjectDetailPage() {
           setOpen={setMemberManagementOpen}
           projectId={project.id}
           projectName={project.name}
+        />
+
+        <ProjectMemberRemoveDialog
+          key={removeTarget?.id ?? "closed"}
+          member={removeTarget}
+          setMember={setRemoveTarget}
+          onConfirm={removeMember}
+          isPending={removeMemberMutation.isPending}
         />
 
         {(applicationMessage || latestApplication?.status === "PENDING") && (
@@ -438,56 +631,58 @@ export default function ProjectDetailPage() {
           </VStack>
         </Box>
 
-        <Box
-          p={5}
-          borderWidth={1}
-          borderColor={"smu.gray"}
-          borderRadius={"lg"}
-          bg={"white"}
-        >
-          <HStack
-            justifyContent={"space-between"}
-            alignItems={"flex-start"}
-            mb={3}
-            gap={3}
-            flexWrap={"wrap"}
+        {project.canViewMembers && project.members && (
+          <Box
+            p={5}
+            borderWidth={1}
+            borderColor={"smu.gray"}
+            borderRadius={"lg"}
+            bg={"white"}
           >
-            <Box>
-              <Text fontSize={"lg"} fontWeight={"bold"} color={"smu.blue"}>
-                팀원 현황
-              </Text>
-              <Text fontSize={"sm"} color={"smu.darkGray"}>
-                현재 {project.memberCount}명이 참여 중입니다.
-              </Text>
-            </Box>
-          </HStack>
+            <HStack
+              justifyContent={"space-between"}
+              alignItems={"flex-start"}
+              mb={3}
+              gap={3}
+              flexWrap={"wrap"}
+            >
+              <Box>
+                <Text fontSize={"lg"} fontWeight={"bold"} color={"smu.blue"}>
+                  팀원 현황
+                </Text>
+                <Text fontSize={"sm"} color={"smu.darkGray"}>
+                  현재 {project.memberCount}명이 참여 중입니다.
+                </Text>
+              </Box>
+              {project.canEdit && (
+                <Button
+                  variant="outline"
+                  onClick={() => setMemberManagementOpen(true)}
+                >
+                  승인 대기 중 ({pendingCount}명)
+                </Button>
+              )}
+            </HStack>
 
-          {project.canViewMembers && project.members ? (
-            project.members.length ? (
+            {project.members.length ? (
               <VStack alignItems={"stretch"} gap={2}>
                 {project.members.map((member) => (
-                  <MemberRow key={member.id} member={member} />
+                  <MemberRow
+                    key={member.id}
+                    member={member}
+                    canRemove={project.canEdit && member.role !== "LEADER"}
+                    removing={removeMemberMutation.isPending}
+                    onRemove={setRemoveTarget}
+                  />
                 ))}
               </VStack>
             ) : (
               <Text fontSize={"sm"} color={"smu.darkGray"}>
                 참여 중인 팀원이 없습니다.
               </Text>
-            )
-          ) : (
-            <Box
-              p={4}
-              borderWidth={1}
-              borderColor={"smu.gray"}
-              borderRadius={"md"}
-              bg={"#f7f7f7"}
-            >
-              <Text fontSize={"sm"} color={"smu.darkGray"}>
-                프로젝트 구성원만 팀원 이름과 역할을 확인할 수 있습니다.
-              </Text>
-            </Box>
-          )}
-        </Box>
+            )}
+          </Box>
+        )}
 
         <Box
           p={5}

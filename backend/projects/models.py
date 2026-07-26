@@ -1,8 +1,9 @@
 from typing import Final
 
-from django.core.exceptions import ValidationError
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 
 from common.models import CommonModel
 
@@ -151,26 +152,16 @@ class Member(CommonModel):
         default=Status.PENDING,
     )
     description = models.CharField(max_length=255, null=True, blank=True)
+    joined_at = models.DateTimeField(null=True, blank=True)
 
-    class Meta:
-        constraints = [
-            models.UniqueConstraint(
-                fields=("project", "id"),
-                name="project_member_project_id_uniq",
-            ),
-        ]
-        indexes = [
-            models.Index(
-                fields=("project", "status"),
-                name="project_member_status_idx",
-            ),
-            models.Index(
-                fields=("user", "status"),
-                name="user_member_status_idx",
-            ),
-        ]
-
-    def transition_to(self, next_status=None):
+    def transition_to(
+        self,
+        next_status=None,
+        *,
+        description=None,
+        update_description=False,
+        require_description=False,
+    ):
         allowed_transitions = {
             self.Status.PENDING: {
                 self.Status.CANCELED,
@@ -194,8 +185,43 @@ class Member(CommonModel):
                 "프로젝트 팀장은 탈퇴하거나 내보낼 수 없습니다.",
                 code="leader_protected",
             )
+        if require_description and not (description or "").strip():
+            raise ValidationError(
+                "멤버를 내보내려면 사유를 입력해주세요.",
+                code="member_description_required",
+            )
+        if (
+            next_status == self.Status.JOINED
+            and not self.project.has_available_member_slot()
+        ):
+            raise ValidationError(
+                "프로젝트 정원이 가득 차 신청을 승인할 수 없습니다.",
+                code="project_capacity_reached",
+            )
 
         self.status = next_status
+        if next_status == self.Status.JOINED:
+            self.joined_at = timezone.now()
+        if update_description:
+            self.description = description
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("project", "id"),
+                name="project_member_project_id_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=("project", "status"),
+                name="project_member_status_idx",
+            ),
+            models.Index(
+                fields=("user", "status"),
+                name="user_member_status_idx",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.project} - {self.user_id or 'unknown'}"

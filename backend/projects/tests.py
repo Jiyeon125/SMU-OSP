@@ -948,6 +948,24 @@ class ProjectApiTests(TestCase):
         with self.assertRaises(ValidationError):
             membership.transition_to(Member.Status.LEFT)
 
+    def test_member_transition_to_requires_reason_when_requested(self):
+        membership = Member.objects.create(
+            project=self.project,
+            user=self.user,
+            status=Member.Status.JOINED,
+        )
+
+        with self.assertRaisesMessage(
+            ValidationError,
+            "멤버를 내보내려면 사유를 입력해주세요.",
+        ):
+            membership.transition_to(
+                Member.Status.LEFT,
+                require_description=True,
+            )
+
+        self.assertEqual(membership.status, Member.Status.JOINED)
+
     def test_pending_project_membership_can_be_canceled(self):
         application_project = Project.objects.create(
             name="Pending Application Project",
@@ -1117,11 +1135,12 @@ class ProjectApiTests(TestCase):
         managed_members = {
             member["id"]: member for member in managed.json()["data"]
         }
+        self.assertEqual(managed_members[joined.pk]["username"], "joined-user")
         self.assertIn(pending.pk, managed_members)
         self.assertIn("description", managed_members[pending.pk])
         self.assertIsNone(managed_members[pending.pk]["description"])
         self.assertIn("createdAt", managed_members[pending.pk])
-        self.assertNotIn("joinedAt", managed_members[pending.pk])
+        self.assertIsNone(managed_members[pending.pk]["joinedAt"])
 
     def test_non_member_cannot_list_project_members(self):
         outsider = get_user_model().objects.create_user(
@@ -1163,6 +1182,11 @@ class ProjectApiTests(TestCase):
             user=applicant,
             status=Member.Status.JOINED,
         )
+        joined_without_reason = Member.objects.create(
+            project=self.project,
+            user=applicant,
+            status=Member.Status.JOINED,
+        )
         self.client.force_login(self.user)
 
         approved = self.client.put(
@@ -1183,21 +1207,68 @@ class ProjectApiTests(TestCase):
             data={"status": Member.Status.LEFT, "description": "프로젝트 종료"},
             content_type="application/json",
         )
+        missing_reason = self.client.put(
+            f"/api/v1/projects/{self.project.pk}/members/{joined_without_reason.pk}",
+            data={"status": Member.Status.LEFT},
+            content_type="application/json",
+        )
 
         self.assertEqual(approved.status_code, 200)
         self.assertIsNone(approved.json()["data"])
         self.assertEqual(declined.status_code, 200)
         self.assertIsNone(declined.json()["data"])
         self.assertEqual(left.status_code, 200)
+        self.assertIsNone(left.json()["data"])
+        self.assertEqual(missing_reason.status_code, 400)
+        self.assertEqual(
+            missing_reason.json()["status"],
+            "INVALID_MEMBER_INPUT",
+        )
         pending.refresh_from_db()
         pending_to_decline.refresh_from_db()
         joined.refresh_from_db()
+        joined_without_reason.refresh_from_db()
         self.assertEqual(pending.status, Member.Status.JOINED)
+        self.assertIsNotNone(pending.joined_at)
         self.assertIsNone(pending.description)
         self.assertEqual(pending_to_decline.status, Member.Status.DECLINED)
         self.assertEqual(pending_to_decline.description, "모집 역할 불일치")
         self.assertEqual(joined.status, Member.Status.LEFT)
         self.assertEqual(joined.description, "프로젝트 종료")
+        self.assertEqual(joined_without_reason.status, Member.Status.JOINED)
+
+    def test_project_member_approval_rejects_full_project(self):
+        applicant = get_user_model().objects.create_user(
+            username="capacity-managed-applicant",
+            password="password",
+            github_email="capacity-managed-applicant@sookmyung.ac.kr",
+            name="정원 초과 승인 대상",
+            student_id=235,
+            major="컴퓨터과학",
+        )
+        pending = Member.objects.create(
+            project=self.project,
+            user=applicant,
+            status=Member.Status.PENDING,
+        )
+        for _ in range(self.project.max_members - 1):
+            Member.objects.create(
+                project=self.project,
+                status=Member.Status.JOINED,
+            )
+        self.client.force_login(self.user)
+
+        response = self.client.put(
+            f"/api/v1/projects/{self.project.pk}/members/{pending.pk}",
+            data={"status": Member.Status.JOINED},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["status"], "PROJECT_CAPACITY_REACHED")
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, Member.Status.PENDING)
+        self.assertIsNone(pending.joined_at)
 
     def test_project_member_update_rejects_invalid_transition_and_target(self):
         applicant = get_user_model().objects.create_user(
@@ -1234,11 +1305,21 @@ class ProjectApiTests(TestCase):
             data={"status": Member.Status.JOINED},
             content_type="application/json",
         )
+        leader = self.client.put(
+            f"/api/v1/projects/{self.project.pk}/members/{self.member.pk}",
+            data={
+                "status": Member.Status.LEFT,
+                "description": "팀장 내보내기 시도",
+            },
+            content_type="application/json",
+        )
 
         self.assertEqual(invalid.status_code, 400)
         self.assertEqual(invalid.json()["status"], "INVALID_MEMBER_STATUS")
         self.assertEqual(missing.status_code, 404)
         self.assertEqual(missing.json()["status"], "MEMBER_NOT_FOUND")
+        self.assertEqual(leader.status_code, 404)
+        self.assertEqual(leader.json()["status"], "MEMBER_NOT_FOUND")
 
     def create_projects_for_pagination(self, total):
         self.project.delete()
