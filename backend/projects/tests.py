@@ -183,8 +183,7 @@ class ProjectApiTests(TestCase):
         self.assertFalse(data["canEdit"])
         self.assertIsNone(data["members"])
 
-    def test_project_leader_can_update_all_project_fields(self):
-        repository_id = self.repository.pk
+    def test_project_leader_can_update_project_fields(self):
         self.client.force_login(self.user)
 
         response = self.client.put(
@@ -192,7 +191,6 @@ class ProjectApiTests(TestCase):
             data=self.project_update_payload(
                 name="Updated SOSP",
                 description="수정된 프로젝트 설명",
-                repositoryUrl="https://github.com/example/updated-project",
                 demoUrl="https://updated.example.com",
                 presentationUrl="https://updated.example.com/slides",
                 techStack=["React", "Django", "MySQL"],
@@ -223,22 +221,14 @@ class ProjectApiTests(TestCase):
             ["Django REST framework", "Chakra UI"],
         )
 
-        repository = Repository.objects.get(pk=repository_id)
+        self.repository.refresh_from_db()
         self.assertEqual(
-            repository.html_url,
-            "https://github.com/example/updated-project",
+            self.repository.html_url,
+            "https://github.com/Jiyeon125/SMU-OSP",
         )
-        self.assertIsNone(repository.github_id)
-        self.assertIsNone(repository.description)
-        self.assertEqual(repository.stars, 0)
-        self.assertEqual(repository.forks, 0)
-        self.assertIsNone(repository.language)
-        self.assertEqual(repository.topics, [])
-        self.assertIsNone(repository.github_updated_at)
-        self.assertIsNone(repository.fetched_at)
-        self.assertIsNone(repository.refresh_status)
+        self.assertEqual(self.repository.github_id, 101)
 
-    def test_project_leader_can_remove_repository_connection(self):
+    def test_project_leader_cannot_remove_repository_connection(self):
         self.client.force_login(self.user)
 
         response = self.client.put(
@@ -247,9 +237,38 @@ class ProjectApiTests(TestCase):
             content_type="application/json",
         )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertIsNone(response.json()["data"])
-        self.assertFalse(Repository.objects.filter(project=self.project).exists())
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["status"], "INVALID_PROJECT_INPUT")
+        self.assertEqual(
+            response.json()["detail"]["message"],
+            "이미 등록된 Repository는 변경하거나 연결 해제할 수 없습니다.",
+        )
+        self.assertTrue(Repository.objects.filter(project=self.project).exists())
+
+    def test_project_leader_cannot_change_repository_connection(self):
+        self.client.force_login(self.user)
+
+        response = self.client.put(
+            f"/api/v1/projects/{self.project.pk}",
+            data=self.project_update_payload(
+                name="롤백되어야 하는 이름",
+                repositoryUrl="https://github.com/example/other-project",
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()["detail"]["message"],
+            "이미 등록된 Repository는 변경하거나 연결 해제할 수 없습니다.",
+        )
+        self.project.refresh_from_db()
+        self.repository.refresh_from_db()
+        self.assertEqual(self.project.name, "SOSP")
+        self.assertEqual(
+            self.repository.html_url,
+            "https://github.com/Jiyeon125/SMU-OSP",
+        )
 
     def test_non_leader_cannot_update_project(self):
         teammate = get_user_model().objects.create_user(
@@ -277,6 +296,87 @@ class ProjectApiTests(TestCase):
         self.assertEqual(response.json()["status"], "PERMISSION_DENIED")
         self.project.refresh_from_db()
         self.assertEqual(self.project.name, "SOSP")
+
+    def test_project_completion_cancels_pending_memberships(self):
+        pending = Member.objects.create(
+            project=self.project,
+            status=Member.Status.PENDING,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.put(
+            f"/api/v1/projects/{self.project.pk}",
+            data=self.project_update_payload(status=Project.Status.FINISHED),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, Member.Status.CANCELED)
+
+    def test_project_leader_can_soft_delete_project(self):
+        pending = Member.objects.create(
+            project=self.project,
+            status=Member.Status.PENDING,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.delete(f"/api/v1/projects/{self.project.pk}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["data"])
+        self.project.refresh_from_db()
+        pending.refresh_from_db()
+        self.assertEqual(self.project.status, Project.Status.DELETED)
+        self.assertEqual(pending.status, Member.Status.CANCELED)
+        self.assertTrue(Repository.objects.filter(project=self.project).exists())
+        self.assertTrue(Member.objects.filter(project=self.project).exists())
+
+        restore_response = self.client.put(
+            f"/api/v1/projects/{self.project.pk}",
+            data=self.project_update_payload(status=Project.Status.ACTIVE),
+            content_type="application/json",
+        )
+        self.assertEqual(restore_response.status_code, 400)
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.status, Project.Status.DELETED)
+
+    def test_non_leader_cannot_delete_project(self):
+        teammate = get_user_model().objects.create_user(
+            username="delete-nonleader",
+            password="password",
+            github_email="delete-nonleader@sookmyung.ac.kr",
+            name="삭제 권한 없는 팀원",
+            student_id=219,
+            major="컴퓨터과학",
+        )
+        Member.objects.create(
+            project=self.project,
+            user=teammate,
+            status=Member.Status.JOINED,
+        )
+        self.client.force_login(teammate)
+
+        response = self.client.delete(f"/api/v1/projects/{self.project.pk}")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["status"], "PERMISSION_DENIED")
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.status, Project.Status.ACTIVE)
+
+    def test_project_update_rejects_deleted_status(self):
+        self.client.force_login(self.user)
+
+        response = self.client.put(
+            f"/api/v1/projects/{self.project.pk}",
+            data=self.project_update_payload(status=Project.Status.DELETED),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["status"], "INVALID_PROJECT_INPUT")
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.status, Project.Status.ACTIVE)
 
     def test_finished_project_cannot_be_updated(self):
         self.project.status = Project.Status.FINISHED
@@ -328,6 +428,22 @@ class ProjectApiTests(TestCase):
         self.assertIsNone(body["data"])
         self.assertEqual(body["detail"]["httpStatus"], 404)
 
+    def test_project_update_and_delete_return_not_found(self):
+        self.client.force_login(self.user)
+
+        responses = (
+            self.client.put(
+                "/api/v1/projects/999",
+                data=self.project_update_payload(),
+                content_type="application/json",
+            ),
+            self.client.delete("/api/v1/projects/999"),
+        )
+
+        for response in responses:
+            self.assertEqual(response.status_code, 404)
+            self.assertEqual(response.json()["status"], "PROJECT_NOT_FOUND")
+
     def test_project_delete_cascades_to_repository_and_members(self):
         repository_id = self.repository.pk
         member_id = self.member.pk
@@ -338,7 +454,19 @@ class ProjectApiTests(TestCase):
         self.assertFalse(Repository.objects.filter(pk=repository_id).exists())
         self.assertFalse(Member.objects.filter(pk=member_id).exists())
 
-    def test_create_project_creates_leader_member_and_url_only_repository(self):
+    @patch("projects.services.requests.get")
+    def test_create_project_creates_leader_member_and_repository(
+        self,
+        request_get,
+    ):
+        request_get.return_value.status_code = 200
+        request_get.return_value.json.return_value = {
+            "id": 202,
+            "name": "new-project",
+            "full_name": "example/new-project",
+            "html_url": "https://github.com/example/new-project",
+            "private": False,
+        }
         self.client.force_login(self.user)
 
         response = self.client.post(
@@ -384,7 +512,7 @@ class ProjectApiTests(TestCase):
             repository.html_url,
             "https://github.com/example/new-project",
         )
-        self.assertIsNone(repository.github_id)
+        self.assertEqual(repository.github_id, 202)
         self.assertIsNone(repository.fetched_at)
 
     def test_create_project_without_repository_url_keeps_repository_empty(self):
@@ -407,6 +535,124 @@ class ProjectApiTests(TestCase):
         self.assertEqual(project.max_members, 5)
         self.assertFalse(Repository.objects.filter(project=project).exists())
         self.assertTrue(project.members.get().is_leader)
+
+    @patch("projects.services.requests.get")
+    def test_create_project_rolls_back_when_repository_lookup_fails(
+        self,
+        request_get,
+    ):
+        request_get.return_value.status_code = 404
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            "/api/v1/projects/",
+            data={
+                "name": "Invalid Repository Project",
+                "description": "조회되지 않는 Repository는 등록하지 않습니다.",
+                "repositoryUrl": "https://github.com/example/not-found",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()["detail"]["message"],
+            "존재하는 공개 GitHub Repository URL을 입력해주세요.",
+        )
+        self.assertFalse(
+            Project.objects.filter(name="Invalid Repository Project").exists()
+        )
+
+    def test_create_project_rejects_repository_linked_to_another_project(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            "/api/v1/projects/",
+            data={
+                "name": "Duplicate Repository Project",
+                "description": "이미 연결된 Repository를 사용할 수 없습니다.",
+                "repositoryUrl": "https://github.com/jiyeon125/smu-osp",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["status"], "INVALID_PROJECT_INPUT")
+        self.assertEqual(
+            response.json()["detail"]["message"],
+            "이미 다른 프로젝트에 연결된 Repository입니다.",
+        )
+        self.assertFalse(
+            Project.objects.filter(name="Duplicate Repository Project").exists()
+        )
+
+    @patch("projects.services.requests.get")
+    def test_project_without_repository_can_add_one(
+        self,
+        request_get,
+    ):
+        request_get.return_value.status_code = 200
+        request_get.return_value.json.return_value = {
+            "id": 303,
+            "name": "new-project",
+            "full_name": "example/new-project",
+            "html_url": "https://github.com/example/new-project",
+            "private": False,
+        }
+        self.repository.delete()
+        self.client.force_login(self.user)
+
+        response = self.client.put(
+            f"/api/v1/projects/{self.project.pk}",
+            data=self.project_update_payload(
+                repositoryUrl="https://github.com/example/new-project"
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        repository = Repository.objects.get(project=self.project)
+        self.assertEqual(repository.github_id, 303)
+        self.assertEqual(
+            repository.html_url,
+            "https://github.com/example/new-project",
+        )
+
+    @patch("projects.services.requests.get")
+    def test_project_update_rolls_back_when_repository_lookup_fails(
+        self,
+        request_get,
+    ):
+        request_get.return_value.status_code = 404
+        self.repository.delete()
+        self.client.force_login(self.user)
+
+        response = self.client.put(
+            f"/api/v1/projects/{self.project.pk}",
+            data=self.project_update_payload(
+                name="롤백되어야 하는 이름",
+                repositoryUrl="https://github.com/example/not-found",
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.name, "SOSP")
+        self.assertFalse(Repository.objects.filter(project=self.project).exists())
+
+    @patch("projects.services.requests.get")
+    def test_unchanged_repository_does_not_request_github(self, request_get):
+        self.client.force_login(self.user)
+
+        response = self.client.put(
+            f"/api/v1/projects/{self.project.pk}",
+            data=self.project_update_payload(),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        request_get.assert_not_called()
 
     def test_create_project_requires_login(self):
         response = self.client.post(
@@ -463,11 +709,23 @@ class ProjectApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertFalse(Project.objects.filter(name="Rollback Project").exists())
 
-    def test_create_project_rolls_back_when_repository_creation_fails(self):
+    @patch("projects.services.requests.get")
+    def test_create_project_rolls_back_when_repository_creation_fails(
+        self,
+        request_get,
+    ):
+        request_get.return_value.status_code = 200
+        request_get.return_value.json.return_value = {
+            "id": 404,
+            "name": "rollback",
+            "full_name": "example/rollback",
+            "html_url": "https://github.com/example/rollback",
+            "private": False,
+        }
         self.client.force_login(self.user)
 
         with patch(
-            "projects.views.Repository.objects.create",
+            "projects.services.Repository.objects.create",
             side_effect=IntegrityError,
         ):
             response = self.client.post(

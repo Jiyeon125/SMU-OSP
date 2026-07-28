@@ -2,7 +2,6 @@ import {
   Box,
   HStack,
   Input,
-  NativeSelect,
   SimpleGrid,
   Spinner,
   Text,
@@ -17,8 +16,6 @@ import { Button } from "../components/ui/button";
 import useUser from "../lib/useUser";
 import { getProject, updateProject } from "../services/projectService";
 import {
-  PROJECT_STATUS_LABEL,
-  type ProjectStatus,
   type ProjectUpdateInput,
 } from "../types/project";
 
@@ -52,7 +49,6 @@ export default function ProjectEditPage() {
   const [presentationUrl, setPresentationUrl] = useState("");
   const [techStack, setTechStack] = useState("");
   const [usedOpenSource, setUsedOpenSource] = useState("");
-  const [status, setStatus] = useState<ProjectStatus>("ACTIVE");
   const [initializedProjectId, setInitializedProjectId] = useState<number>();
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -79,7 +75,6 @@ export default function ProjectEditPage() {
     setPresentationUrl(project.presentationUrl || "");
     setTechStack(project.techStack.join(", "));
     setUsedOpenSource(project.usedOpenSource.join(", "));
-    setStatus(project.status);
     setInitializedProjectId(project.id);
   }, [initializedProjectId, projectResponse]);
 
@@ -146,6 +141,7 @@ export default function ProjectEditPage() {
       </MessageCard>
     );
   }
+  const hasRepository = !!project.repository;
 
   const handleSubmit = () => {
     if (mutation.isPending) return;
@@ -167,7 +163,7 @@ export default function ProjectEditPage() {
       presentationUrl: optionalUrl(presentationUrl),
       techStack: parseCommaList(techStack),
       usedOpenSource: parseCommaList(usedOpenSource),
-      status,
+      status: "ACTIVE",
     });
   };
 
@@ -221,8 +217,13 @@ export default function ProjectEditPage() {
                 onChange={(e) => setRepositoryUrl(e.target.value)}
                 placeholder="https://github.com/owner/repository"
                 maxLength={MAX_PROJECT_URL_LENGTH}
-                disabled={mutation.isPending}
+                disabled={mutation.isPending || hasRepository}
               />
+              {hasRepository && (
+                <Text mt={1} fontSize={"xs"} color={"smu.darkGray"}>
+                  등록된 Repository는 변경하거나 연결 해제할 수 없습니다.
+                </Text>
+              )}
             </Field>
 
             <SimpleGrid columns={{ base: 1, md: 2 }} gap={4}>
@@ -264,22 +265,6 @@ export default function ProjectEditPage() {
                 />
               </Field>
             </SimpleGrid>
-
-            <Field label="프로젝트 상태" required>
-              <NativeSelect.Root disabled={mutation.isPending}>
-                <NativeSelect.Field
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value as ProjectStatus)}
-                >
-                  {Object.entries(PROJECT_STATUS_LABEL).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </NativeSelect.Field>
-                <NativeSelect.Indicator />
-              </NativeSelect.Root>
-            </Field>
 
             {errorMessage && (
               <Box
