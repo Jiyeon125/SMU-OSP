@@ -209,7 +209,6 @@ class Projects(APIView):
                     description=data["description"],
                     demo_url=data.get("demo_url"),
                     presentation_url=data.get("presentation_url"),
-                    used_open_source=data.get("used_open_source", []),
                 )
                 project.languages.set(languages)
                 leader_member = Member.objects.create(
@@ -368,7 +367,6 @@ class ProjectDetail(APIView):
                     "description",
                     "demo_url",
                     "presentation_url",
-                    "used_open_source",
                 ):
                     setattr(project, field, data[field])
                 project.set_status(data["status"])

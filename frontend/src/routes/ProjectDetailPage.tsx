@@ -766,15 +766,6 @@ export default function ProjectDetailPage() {
                 ))}
               </HStack>
             </Section>
-            <Section title="사용 오픈소스">
-              <HStack flexWrap={"wrap"} gap={1}>
-                {project.usedOpenSource.map((r) => (
-                  <Pill key={r} bg={"smu.blue"} color={"white"}>
-                    {r}
-                  </Pill>
-                ))}
-              </HStack>
-            </Section>
           </VStack>
         </Box>
 

@@ -583,7 +583,6 @@ class ProjectApiTests(TestCase):
             name="SOSP",
             description="SMU Open-Source Platform",
             demo_url="https://sosp.sookmyung.ac.kr",
-            used_open_source=["Django REST framework"],
             status=Project.Status.ACTIVE,
         )
         self.project.languages.set(
@@ -677,7 +676,6 @@ class ProjectApiTests(TestCase):
             "name": "Language Project",
             "description": "사용 언어 검증",
             "techStack": ["python", "PYTHON", "TypeScript"],
-            "usedOpenSource": [],
         }
 
         response = self.client.post(
@@ -825,7 +823,6 @@ class ProjectApiTests(TestCase):
                 demoUrl="https://updated.example.com",
                 presentationUrl="https://updated.example.com/slides",
                 techStack=["TypeScript", "Python", "Go"],
-                usedOpenSource=["Django REST framework", "Chakra UI"],
                 status=Project.Status.FINISHED,
             ),
             content_type="application/json",
@@ -850,11 +847,6 @@ class ProjectApiTests(TestCase):
             list(self.project.languages.values_list("name", flat=True)),
             ["Go", "Python", "TypeScript"],
         )
-        self.assertEqual(
-            self.project.used_open_source,
-            ["Django REST framework", "Chakra UI"],
-        )
-
         self.repository.refresh_from_db()
         self.assertEqual(
             self.repository.html_url,
@@ -1132,7 +1124,6 @@ class ProjectApiTests(TestCase):
                     "demoUrl": "",
                     "presentationUrl": "",
                     "techStack": ["TypeScript", "Python"],
-                    "usedOpenSource": ["Django REST framework"],
                 },
                 content_type="application/json",
             )
@@ -1638,7 +1629,6 @@ class ProjectApiTests(TestCase):
             "techStack": list(
                 self.project.languages.values_list("name", flat=True)
             ),
-            "usedOpenSource": self.project.used_open_source,
             "status": self.project.status,
         }
         payload.update(overrides)
@@ -2350,7 +2340,6 @@ class ProjectApiTests(TestCase):
             project = Project.objects.create(
                 name=f"Project {index}",
                 description=f"Project {index} description",
-                used_open_source=["Django REST framework"],
                 status=Project.Status.ACTIVE,
             )
             project.languages.add(language)

@@ -146,23 +146,6 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
             "max_length": "최대 20개까지 입력할 수 있습니다.",
         },
     )
-    usedOpenSource = serializers.ListField(
-        source="used_open_source",
-        child=serializers.CharField(
-            allow_blank=True,
-            max_length=MAX_LIST_ITEM_LENGTH,
-            trim_whitespace=True,
-            error_messages={
-                "max_length": "각 항목은 100자 이하로 입력해주세요.",
-            },
-        ),
-        required=False,
-        max_length=MAX_LIST_ITEMS,
-        error_messages={
-            "not_a_list": "목록 형식으로 입력해주세요.",
-            "max_length": "최대 20개까지 입력할 수 있습니다.",
-        },
-    )
     class Meta:
         model = Project
         fields = (
@@ -172,7 +155,6 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
             "demoUrl",
             "presentationUrl",
             "techStack",
-            "usedOpenSource",
         )
 
     def validate(self, attrs):
@@ -212,9 +194,6 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
 
         attrs["languages"] = self._resolve_languages(
             self._normalize_string_list(attrs.get("languages", []))
-        )
-        attrs["used_open_source"] = self._normalize_string_list(
-            attrs.get("used_open_source", [])
         )
         return attrs
 
@@ -322,10 +301,6 @@ class ProjectSerializer(serializers.ModelSerializer):
         read_only=True,
         slug_field="name",
     )
-    usedOpenSource = serializers.ListField(
-        source="used_open_source",
-        child=serializers.CharField(),
-    )
     maxMembers = serializers.IntegerField(source="max_members")
     repository = RepositorySerializer(read_only=True, allow_null=True)
     membershipRole = serializers.SerializerMethodField()
@@ -349,7 +324,6 @@ class ProjectSerializer(serializers.ModelSerializer):
             "demoUrl",
             "presentationUrl",
             "techStack",
-            "usedOpenSource",
             "status",
             "maxMembers",
             "repository",

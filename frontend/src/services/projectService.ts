@@ -225,7 +225,6 @@ export async function finishProject(
     demoUrl: project.demoUrl || null,
     presentationUrl: project.presentationUrl || null,
     techStack: project.techStack,
-    usedOpenSource: project.usedOpenSource,
     status: "FINISHED",
   });
 }
@@ -240,7 +239,6 @@ export async function reactivateProject(
     demoUrl: project.demoUrl || null,
     presentationUrl: project.presentationUrl || null,
     techStack: project.techStack,
-    usedOpenSource: project.usedOpenSource,
     status: "ACTIVE",
   });
 }

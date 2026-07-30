@@ -23,14 +23,6 @@ import {
 const MAX_PROJECT_NAME_LENGTH = 100;
 const MAX_PROJECT_DESCRIPTION_LENGTH = 2000;
 const MAX_PROJECT_URL_LENGTH = 500;
-const MAX_PROJECT_LIST_INPUT_LENGTH = 2000;
-
-function parseCommaList(value: string) {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
 
 function optionalUrl(value: string) {
   const trimmed = value.trim();
@@ -58,7 +50,6 @@ export default function ProjectEditPage() {
   const [demoUrl, setDemoUrl] = useState("");
   const [presentationUrl, setPresentationUrl] = useState("");
   const [techStack, setTechStack] = useState<string[]>([]);
-  const [usedOpenSource, setUsedOpenSource] = useState("");
   const [initializedProjectId, setInitializedProjectId] = useState<number>();
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -86,7 +77,6 @@ export default function ProjectEditPage() {
     setDemoUrl(project.demoUrl || "");
     setPresentationUrl(project.presentationUrl || "");
     setTechStack(project.techStack);
-    setUsedOpenSource(project.usedOpenSource.join(", "));
     if (!project.repository && retryRepositoryError) {
       setErrorMessage(retryRepositoryError);
     }
@@ -182,7 +172,6 @@ export default function ProjectEditPage() {
       demoUrl: optionalUrl(demoUrl),
       presentationUrl: optionalUrl(presentationUrl),
       techStack,
-      usedOpenSource: parseCommaList(usedOpenSource),
       status: "ACTIVE",
     });
   };
@@ -270,15 +259,6 @@ export default function ProjectEditPage() {
                 <ProjectLanguageSelect
                   value={techStack}
                   onChange={setTechStack}
-                  disabled={mutation.isPending}
-                />
-              </Field>
-              <Field label="사용 오픈소스">
-                <Input
-                  value={usedOpenSource}
-                  onChange={(e) => setUsedOpenSource(e.target.value)}
-                  placeholder="Chakra UI, React Query"
-                  maxLength={MAX_PROJECT_LIST_INPUT_LENGTH}
                   disabled={mutation.isPending}
                 />
               </Field>
