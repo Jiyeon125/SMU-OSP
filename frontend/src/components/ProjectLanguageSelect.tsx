@@ -39,7 +39,7 @@ export default function ProjectLanguageSelect({
       items: languages
         .filter(
           (name) =>
-            !search || name.toLocaleLowerCase().startsWith(search)
+            !search || name.toLocaleLowerCase().includes(search)
         )
         .map((name) => ({ label: name, value: name })),
     });
