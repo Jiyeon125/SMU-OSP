@@ -1,3 +1,4 @@
+from datetime import timedelta
 from typing import Final
 
 from django.conf import settings
@@ -13,36 +14,74 @@ def get_default_max_members():
 
 
 class Repository(CommonModel):
-    class RefreshStatus(models.TextChoices):
-        SUCCESS = "SUCCESS", "Success"
-        FAILED = "FAILED", "Failed"
-
     project = models.OneToOneField(
         "Project",
         on_delete=models.CASCADE,
         related_name="repository",
     )
-    github_id = models.PositiveBigIntegerField(null=True, blank=True, unique=True)
+    github_id = models.PositiveBigIntegerField(unique=True)
     name = models.CharField(max_length=150)
     full_name = models.CharField(max_length=300)
-    description = models.TextField(null=True, blank=True)
-    stars = models.PositiveIntegerField(default=0)
-    forks = models.PositiveIntegerField(default=0)
-    language = models.CharField(max_length=100, null=True, blank=True)
-    topics = models.JSONField(default=list, blank=True)
     html_url = models.URLField(max_length=500)
-    github_updated_at = models.DateTimeField(null=True, blank=True)
-    fetched_at = models.DateTimeField(null=True, blank=True)
-    refresh_status = models.CharField(
-        max_length=30,
-        choices=RefreshStatus.choices,
-        null=True,
-        blank=True,
-    )
-    last_error_code = models.CharField(max_length=100, null=True, blank=True)
 
     def __str__(self):
         return self.full_name
+
+
+class RepositorySnapshot(models.Model):
+    repository = models.ForeignKey(
+        Repository,
+        on_delete=models.CASCADE,
+        related_name="snapshots",
+    )
+    date = models.DateField()
+    pull_requests = models.PositiveIntegerField(default=0)
+    commits = models.PositiveIntegerField(default=0)
+    stars = models.PositiveIntegerField(default=0)
+    forks = models.PositiveIntegerField(default=0)
+    has_code_changed = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("repository", "date"),
+                name="repository_snapshot_date_uniq",
+            ),
+        ]
+
+
+class RepositoryLanguage(models.Model):
+    repository = models.ForeignKey(
+        Repository,
+        on_delete=models.CASCADE,
+        related_name="languages",
+    )
+    language = models.CharField(max_length=100)
+    bytes = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("repository", "language"),
+                name="repository_language_uniq",
+            ),
+        ]
+
+
+class RepositoryStatus(models.Model):
+    repository = models.OneToOneField(
+        Repository,
+        on_delete=models.CASCADE,
+        primary_key=True,
+        related_name="status",
+    )
+    current_streak = models.PositiveIntegerField(default=0)
+    max_streak = models.PositiveIntegerField(default=0)
+    description = models.TextField(null=True, blank=True)
+    last_status_code = models.CharField(max_length=30)
+    fetched_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
 
 class Project(CommonModel):
@@ -106,12 +145,16 @@ class Project(CommonModel):
             self.Status.ACTIVE: {
                 self.Status.ACTIVE,
                 self.Status.FINISHED,
+                self.Status.INACTIVE,
                 self.Status.DELETED,
             },
             self.Status.INACTIVE: {
+                self.Status.ACTIVE,
                 self.Status.DELETED,
             },
-            self.Status.FINISHED: set(),
+            self.Status.FINISHED: {
+                self.Status.DELETED,
+            },
             self.Status.DELETED: set(),
         }
         if status not in allowed_transitions[self.status]:
@@ -122,6 +165,35 @@ class Project(CommonModel):
                 status=Member.Status.CANCELED,
                 updated_at=timezone.now(),
             )
+
+    def deactivate_if_repository_inactive(self, snapshot_date):
+        if self.status != self.Status.ACTIVE:
+            return False
+
+        repository = getattr(self, "repository", None)
+        if repository is None:
+            return False
+        snapshots = list(
+            repository.snapshots.order_by("-date").values_list(
+                "date",
+                "has_code_changed",
+            )[:30]
+        )
+        expected_dates = [
+            snapshot_date - timedelta(days=offset)
+            for offset in range(30)
+        ]
+        if len(snapshots) != 30 or any(
+            date != expected_date or has_code_changed
+            for (date, has_code_changed), expected_date in zip(
+                snapshots,
+                expected_dates,
+            )
+        ):
+            return False
+
+        self.set_status(self.Status.INACTIVE)
+        return True
 
     def __str__(self):
         return self.name

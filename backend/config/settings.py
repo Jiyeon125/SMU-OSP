@@ -192,11 +192,19 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default="redis://127.0.0.1:6379/0")
 CELERY_TIMEZONE = "Asia/Seoul"
+REPOSITORY_REFRESH_TASK_RATE_LIMIT = env(
+    "REPOSITORY_REFRESH_TASK_RATE_LIMIT",
+    default="10/m",
+)
 
 CELERY_BEAT_SCHEDULE = {
     "daily-update": {
         "task": "users.tasks.daily_update",
         "schedule": crontab(minute="0", hour="0,6,12,18"),
+    },
+    "repository-refresh": {
+        "task": "projects.tasks.enqueue_daily_repository_refreshes",
+        "schedule": crontab(minute="10", hour="0,1,2"),
     },
 }
 

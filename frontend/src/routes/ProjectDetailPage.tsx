@@ -27,12 +27,14 @@ import {
 } from "../components/ui/dialog";
 import {
   applyToProject,
+  canReactivateProjectRepository,
   deleteProject,
   finishProject,
   getProject,
   leaveProject,
   listProjectApplications,
   listProjectMembers,
+  reactivateProject,
   removeProjectMember,
 } from "../services/projectService";
 import {
@@ -43,7 +45,6 @@ import type { ProjectDetailMember } from "../types/project";
 import { formatDateTimeKST } from "../utils/date";
 
 const MAX_REAPPLICATIONS = 5;
-
 function Section({
   title,
   children,
@@ -58,6 +59,19 @@ function Section({
       </Text>
       <Box fontSize={"sm"}>{children}</Box>
     </Box>
+  );
+}
+
+function MessageCloseButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Button
+      aria-label="안내 닫기"
+      size="sm"
+      variant="ghost"
+      onClick={onClick}
+    >
+      ×
+    </Button>
   );
 }
 
@@ -296,6 +310,8 @@ export default function ProjectDetailPage() {
   const [leaveMessage, setLeaveMessage] = useState("");
   const [applicationMessage, setApplicationMessage] = useState("");
   const [projectActionMessage, setProjectActionMessage] = useState("");
+  const [repositoryActionMessage, setRepositoryActionMessage] = useState("");
+  const [repositoryActionFailed, setRepositoryActionFailed] = useState(false);
 
   const projectQuery = useQuery({
     queryKey: ["project", id],
@@ -310,6 +326,8 @@ export default function ProjectDetailPage() {
   });
   const managedProject =
     projectQuery.data?.status === "SUCCESS" ? projectQuery.data.data : null;
+  const isRepositoryCollectionPending =
+    managedProject?.repository?.fetchedAt === null;
   const managedMembersQuery = useQuery({
     queryKey: ["project-members", managedProject?.id, "manage"],
     queryFn: () => listProjectMembers(managedProject!.id, true),
@@ -402,6 +420,25 @@ export default function ProjectDetailPage() {
     },
   });
 
+  const reactivateProjectMutation = useMutation({
+    mutationFn: () => reactivateProject(managedProject!),
+    onSuccess: async (response) => {
+      const failed = response.status !== "SUCCESS";
+      setRepositoryActionFailed(failed);
+      setRepositoryActionMessage(
+        failed
+          ? response.detail.message
+          : "프로젝트를 다시 활성화하고 Repository 수집을 요청했습니다."
+      );
+      if (!failed) {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["project", id] }),
+          queryClient.invalidateQueries({ queryKey: ["projects"] }),
+        ]);
+      }
+    },
+  });
+
   const deleteProjectMutation = useMutation({
     mutationFn: () => deleteProject(managedProject!.id),
     onSuccess: async (response) => {
@@ -482,6 +519,9 @@ export default function ProjectDetailPage() {
       : 0;
   const repositoryName = project.repository?.fullName;
   const repositoryUrl = project.repository?.htmlUrl;
+  const canReactivateProject = canReactivateProjectRepository(project);
+  const canDeleteProject =
+    project.status !== "DELETED" && project.membershipRole === "OWNER";
   const leave = (description: string) => {
     setLeaveMessage("");
     leaveMutation.mutate({
@@ -534,43 +574,45 @@ export default function ProjectDetailPage() {
               </Button>
             )}
             {project.canEdit && (
-              <>
-                <Button
-                  variant="outline"
-                  disabled={finishProjectMutation.isPending}
-                  onClick={() => {
-                    if (window.confirm("프로젝트를 완료하시겠습니까?")) {
-                      setProjectActionMessage("");
-                      finishProjectMutation.mutate();
-                    }
-                  }}
-                >
-                  프로젝트 완료
-                </Button>
-                <Button
-                  colorPalette="red"
-                  variant="outline"
-                  disabled={deleteProjectMutation.isPending}
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        "프로젝트를 삭제하시겠습니까? 삭제 후 복구할 수 없습니다."
-                      )
-                    ) {
-                      setProjectActionMessage("");
-                      deleteProjectMutation.mutate();
-                    }
-                  }}
-                >
-                  프로젝트 삭제
-                </Button>
-                <Button
-                  bg={"smu.blue"}
-                  onClick={() => navigate(`/projects/${project.id}/edit`)}
-                >
-                  프로젝트 수정
-                </Button>
-              </>
+              <Button
+                variant="outline"
+                disabled={finishProjectMutation.isPending}
+                onClick={() => {
+                  if (window.confirm("프로젝트를 완료하시겠습니까?")) {
+                    setProjectActionMessage("");
+                    finishProjectMutation.mutate();
+                  }
+                }}
+              >
+                프로젝트 완료
+              </Button>
+            )}
+            {canDeleteProject && (
+              <Button
+                colorPalette="red"
+                variant="outline"
+                disabled={deleteProjectMutation.isPending}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      "프로젝트를 삭제하시겠습니까? 삭제 후 복구할 수 없습니다."
+                    )
+                  ) {
+                    setProjectActionMessage("");
+                    deleteProjectMutation.mutate();
+                  }
+                }}
+              >
+                프로젝트 삭제
+              </Button>
+            )}
+            {project.canEdit && (
+              <Button
+                bg={"smu.blue"}
+                onClick={() => navigate(`/projects/${project.id}/edit`)}
+              >
+                프로젝트 수정
+              </Button>
             )}
           </HStack>
         </HStack>
@@ -592,7 +634,12 @@ export default function ProjectDetailPage() {
             borderRadius="md"
             bg="white"
           >
-            <Text fontSize="sm">{projectActionMessage}</Text>
+            <HStack justifyContent="space-between" alignItems="center" gap={3}>
+              <Text fontSize="sm">{projectActionMessage}</Text>
+              <MessageCloseButton
+                onClick={() => setProjectActionMessage("")}
+              />
+            </HStack>
           </Box>
         )}
 
@@ -609,7 +656,10 @@ export default function ProjectDetailPage() {
             borderRadius="md"
             bg="white"
           >
-            <Text fontSize="sm">{leaveMessage}</Text>
+            <HStack justifyContent="space-between" alignItems="center" gap={3}>
+              <Text fontSize="sm">{leaveMessage}</Text>
+              <MessageCloseButton onClick={() => setLeaveMessage("")} />
+            </HStack>
           </Box>
         )}
 
@@ -654,9 +704,16 @@ export default function ProjectDetailPage() {
             borderRadius={"md"}
             bg={"white"}
           >
-            <Text fontSize={"sm"}>
-              {applicationMessage || "참가 신청 승인 대기 중입니다."}
-            </Text>
+            <HStack justifyContent="space-between" alignItems="center" gap={3}>
+              <Text fontSize={"sm"}>
+                {applicationMessage || "참가 신청 승인 대기 중입니다."}
+              </Text>
+              {applicationMessage && (
+                <MessageCloseButton
+                  onClick={() => setApplicationMessage("")}
+                />
+              )}
+            </HStack>
           </Box>
         )}
 
@@ -781,9 +838,66 @@ export default function ProjectDetailPage() {
           borderRadius={"lg"}
           bg={"white"}
         >
-          <Text fontSize={"lg"} fontWeight={"bold"} color={"smu.blue"} mb={2}>
-            Repository 결과물
-          </Text>
+          <HStack
+            justifyContent={"space-between"}
+            alignItems={"center"}
+            gap={3}
+            mb={2}
+            flexWrap={"wrap"}
+          >
+            <Text fontSize={"lg"} fontWeight={"bold"} color={"smu.blue"}>
+              Repository 결과물
+            </Text>
+            <HStack gap={2} flexWrap={"wrap"}>
+              {canReactivateProject && (
+                <Button
+                  variant="outline"
+                  disabled={reactivateProjectMutation.isPending}
+                  onClick={() => {
+                    setRepositoryActionMessage("");
+                    reactivateProjectMutation.mutate();
+                  }}
+                >
+                  {reactivateProjectMutation.isPending
+                    ? "활성화 중..."
+                    : "프로젝트 다시 활성화"}
+                </Button>
+              )}
+            </HStack>
+          </HStack>
+          {repositoryActionMessage && (
+            <Box
+              role={repositoryActionFailed ? "alert" : "status"}
+              p={3}
+              mb={3}
+              borderWidth={1}
+              borderColor={
+                repositoryActionFailed ? "smu.orange" : "smu.lightBlue"
+              }
+              borderRadius="md"
+              bg="white"
+            >
+              <HStack justifyContent="space-between" alignItems="center" gap={3}>
+                <Text fontSize="sm">{repositoryActionMessage}</Text>
+                <MessageCloseButton
+                  onClick={() => setRepositoryActionMessage("")}
+                />
+              </HStack>
+            </Box>
+          )}
+          {isRepositoryCollectionPending && (
+            <Box
+              role="status"
+              p={3}
+              mb={3}
+              borderWidth={1}
+              borderColor="smu.lightBlue"
+              borderRadius="md"
+              bg="#f4f9fd"
+            >
+              <Text fontSize="sm">Repository 정보 수집 대기 중입니다.</Text>
+            </Box>
+          )}
           {repositoryName && repositoryUrl ? (
             <VStack alignItems={"stretch"} gap={3}>
               <Text fontSize={"sm"} color={"smu.darkGray"}>
@@ -816,26 +930,11 @@ export default function ProjectDetailPage() {
                     <Stat label="stars" value={`${project.repository.stars}`} />
                     <Stat label="forks" value={`${project.repository.forks}`} />
                     <Stat
-                      label="최근 업데이트"
-                      value={
-                        project.repository.updatedAt
-                          ? formatDateTimeKST(project.repository.updatedAt)
-                          : "-"
-                      }
-                    />
-                    <Stat
-                      label="마지막 조회"
+                      label="최근 수집"
                       value={formatDateTimeKST(project.repository.fetchedAt)}
                     />
                   </SimpleGrid>
                 )}
-                {project.repository?.topics?.length ? (
-                  <HStack flexWrap={"wrap"} gap={1} mb={3}>
-                    {project.repository.topics.map((topic) => (
-                      <Pill key={topic}>{topic}</Pill>
-                    ))}
-                  </HStack>
-                ) : null}
                 <ExternalTextLink href={repositoryUrl}>
                   Repository 열기
                 </ExternalTextLink>

@@ -7,7 +7,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from common.responses import fail, success
-from .models import Member, Project
+from .models import (
+    Member,
+    Project,
+    RepositoryLanguage,
+    RepositorySnapshot,
+)
 from .serializers import (
     ProjectCreateSerializer,
     ProjectDetailSerializer,
@@ -18,11 +23,27 @@ from .serializers import (
     ProjectSerializer,
     ProjectUpdateSerializer,
 )
-from .services import update_project_repository
+from .services import (
+    RepositoryRegistrationError,
+    prepare_project_repository_update,
+    update_project_repository,
+)
 
 DEFAULT_PAGE_SIZE = 10
 TRUE_QUERY_VALUES = {"1", "true"}
 FALSE_QUERY_VALUES = {"0", "false"}
+
+
+def prepare_projects_for_serialization(projects):
+    for project in projects:
+        repository = getattr(project, "repository", None)
+        if repository is None:
+            continue
+        repository.serialized_status = getattr(repository, "status", None)
+        if not hasattr(repository, "serialized_snapshots"):
+            repository.serialized_snapshots = []
+        if not hasattr(repository, "serialized_languages"):
+            repository.serialized_languages = []
 
 
 def parse_pagination(query_params):
@@ -102,7 +123,22 @@ class Projects(APIView):
             )
 
         projects = (
-            Project.objects.select_related("repository")
+            Project.objects.select_related("repository", "repository__status")
+            .prefetch_related(
+                Prefetch(
+                    "repository__snapshots",
+                    queryset=RepositorySnapshot.objects.order_by("-date")[:1],
+                    to_attr="serialized_snapshots",
+                ),
+                Prefetch(
+                    "repository__languages",
+                    queryset=RepositoryLanguage.objects.order_by(
+                        "-bytes",
+                        "language",
+                    ),
+                    to_attr="serialized_languages",
+                ),
+            )
             .all()
             .order_by("-updated_at", "-pk")
         )
@@ -127,7 +163,8 @@ class Projects(APIView):
             )
 
         count = projects.count()
-        projects = projects[start : start + limit]
+        projects = list(projects[start : start + limit])
+        prepare_projects_for_serialization(projects)
         serializer = ProjectSerializer(
             projects,
             many=True,
@@ -179,16 +216,6 @@ class Projects(APIView):
                     status=Member.Status.JOINED,
                 )
                 project.request_user_memberships = [leader_member]
-                update_project_repository(project, repository_url)
-        except ValueError as error:
-            return Response(
-                fail(
-                    "INVALID_PROJECT_INPUT",
-                    str(error),
-                    status.HTTP_400_BAD_REQUEST,
-                ),
-                status=status.HTTP_400_BAD_REQUEST,
-            )
         except IntegrityError:
             return Response(
                 fail(
@@ -199,8 +226,21 @@ class Projects(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        detail = None
+        try:
+            update_project_repository(project, repository_url)
+        except ValueError as error:
+            detail = {
+                "repositoryRegistration": {
+                    "status": "FAILED",
+                    "code": getattr(error, "code", "INVALID_PROJECT_INPUT"),
+                    "message": str(error),
+                }
+            }
+
+        prepare_projects_for_serialization([project])
         return Response(
-            success(ProjectSerializer(project).data),
+            success(ProjectSerializer(project).data, detail),
             status=status.HTTP_201_CREATED,
         )
 
@@ -214,13 +254,29 @@ class ProjectDetail(APIView):
         )
         try:
             project = (
-                Project.objects.select_related("repository")
+                Project.objects.select_related(
+                    "repository",
+                    "repository__status",
+                )
                 .prefetch_related(
                     Prefetch(
                         "members",
                         queryset=joined_members,
                         to_attr="joined_members",
-                    )
+                    ),
+                    Prefetch(
+                        "repository__snapshots",
+                        queryset=RepositorySnapshot.objects.order_by("-date")[:1],
+                        to_attr="serialized_snapshots",
+                    ),
+                    Prefetch(
+                        "repository__languages",
+                        queryset=RepositoryLanguage.objects.order_by(
+                            "-bytes",
+                            "language",
+                        ),
+                        to_attr="serialized_languages",
+                    ),
                 )
                 .get(pk=pk)
             )
@@ -252,6 +308,7 @@ class ProjectDetail(APIView):
         project.request_user_memberships = (
             [current_member] if current_member is not None else []
         )
+        prepare_projects_for_serialization([project])
         serializer = ProjectDetailSerializer(
             project,
             context={
@@ -269,6 +326,26 @@ class ProjectDetail(APIView):
             is_leader=True,
         )
         try:
+            project = (
+                Project.objects.select_related("repository")
+                .annotate(is_leader=Exists(leader_members))
+                .get(pk=pk)
+            )
+            if not project.is_leader:
+                raise PermissionDenied
+
+            serializer = ProjectUpdateSerializer(
+                project,
+                data=request.data,
+            )
+            serializer.is_valid(raise_exception=True)
+            data = serializer.validated_data
+            repository_url = data.get("repository_url")
+            repository_data = prepare_project_repository_update(
+                project,
+                repository_url,
+            )
+
             with transaction.atomic():
                 project = (
                     Project.objects.select_for_update()
@@ -280,13 +357,7 @@ class ProjectDetail(APIView):
                 if not project.is_leader:
                     raise PermissionDenied
 
-                serializer = ProjectUpdateSerializer(
-                    project,
-                    data=request.data,
-                )
-                serializer.is_valid(raise_exception=True)
-
-                data = serializer.validated_data
+                previous_project_status = project.status
                 for field in (
                     "name",
                     "description",
@@ -298,7 +369,12 @@ class ProjectDetail(APIView):
                     setattr(project, field, data[field])
                 project.set_status(data["status"])
                 project.save()
-                update_project_repository(project, data.get("repository_url"))
+                update_project_repository(
+                    project,
+                    repository_url,
+                    previous_project_status=previous_project_status,
+                    repository_data=repository_data,
+                )
         except Project.DoesNotExist:
             return Response(
                 fail(
@@ -322,6 +398,15 @@ class ProjectDetail(APIView):
                 fail(
                     "INVALID_PROJECT_INPUT",
                     first_serializer_error(error.detail),
+                    status.HTTP_400_BAD_REQUEST,
+                ),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except RepositoryRegistrationError as error:
+            return Response(
+                fail(
+                    error.code,
+                    str(error),
                     status.HTTP_400_BAD_REQUEST,
                 ),
                 status=status.HTTP_400_BAD_REQUEST,

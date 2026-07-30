@@ -1,9 +1,14 @@
-from urllib.parse import urlparse
+from django.db import IntegrityError, transaction
 
-import requests
-from django.conf import settings
-
-from .models import Repository
+from .github_client import (
+    GitHubClientError,
+    GitHubErrorCode,
+    GitHubRepositoryIdentity,
+    fetch_repository_identity,
+    parse_repository_url,
+)
+from .models import Project, Repository
+from .tasks import enqueue_repository_refresh
 
 REPOSITORY_ALREADY_LINKED_MESSAGE = (
     "이미 다른 프로젝트에 연결된 Repository입니다."
@@ -17,84 +22,121 @@ REPOSITORY_INVALID_MESSAGE = (
 REPOSITORY_LOOKUP_FAILED_MESSAGE = (
     "GitHub Repository 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요."
 )
+REPOSITORY_SAVE_FAILED_MESSAGE = (
+    "Repository를 등록하지 못했습니다. 잠시 후 다시 시도해주세요."
+)
 
 
-def _parse_repository_identity(repository_url):
-    parsed = urlparse(repository_url)
-    path_parts = [part for part in parsed.path.split("/") if part]
-    if (
-        parsed.hostname not in {"github.com", "www.github.com"}
-        or len(path_parts) != 2
-    ):
-        raise ValueError(REPOSITORY_INVALID_MESSAGE)
-    return "/".join(path_parts).removesuffix(".git")
+class RepositoryRegistrationError(ValueError):
+    def __init__(self, code: str, message: str):
+        self.code = code
+        super().__init__(message)
 
 
-def _get_repository_data(full_name):
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    token = getattr(settings, "GH_PAT", "")
-    if token and not token.startswith("dummy"):
-        headers["Authorization"] = f"Bearer {token}"
+def _registration_error(
+    error: GitHubClientError,
+) -> RepositoryRegistrationError:
+    code, message = {
+        GitHubErrorCode.INVALID_URL: (
+            "INVALID_GITHUB_URL",
+            REPOSITORY_INVALID_MESSAGE,
+        ),
+        GitHubErrorCode.REPOSITORY_NOT_FOUND: (
+            "GITHUB_REPOSITORY_NOT_FOUND",
+            REPOSITORY_INVALID_MESSAGE,
+        ),
+        GitHubErrorCode.PRIVATE_REPOSITORY: (
+            "PRIVATE_REPOSITORY",
+            REPOSITORY_INVALID_MESSAGE,
+        ),
+        GitHubErrorCode.RATE_LIMIT_EXCEEDED: (
+            "GITHUB_RATE_LIMIT_EXCEEDED",
+            REPOSITORY_LOOKUP_FAILED_MESSAGE,
+        ),
+        GitHubErrorCode.API_FAILED: (
+            "GITHUB_API_FAILED",
+            REPOSITORY_LOOKUP_FAILED_MESSAGE,
+        ),
+    }[error.code]
+    return RepositoryRegistrationError(code, message)
+
+
+def prepare_repository_registration(
+    repository_url: str,
+) -> GitHubRepositoryIdentity:
+    try:
+        full_name = parse_repository_url(repository_url)
+    except GitHubClientError as error:
+        raise _registration_error(error) from error
+    if Repository.objects.filter(full_name__iexact=full_name).exists():
+        raise ValueError(REPOSITORY_ALREADY_LINKED_MESSAGE)
 
     try:
-        response = requests.get(
-            f"https://api.github.com/repos/{full_name}",
-            headers=headers,
-            timeout=10,
-        )
-    except requests.RequestException as error:
-        raise ValueError(REPOSITORY_LOOKUP_FAILED_MESSAGE) from error
-
-    if response.status_code == 404:
-        raise ValueError(REPOSITORY_INVALID_MESSAGE)
-    if response.status_code == 403:
-        if response.headers.get("X-RateLimit-Remaining") == "0":
-            raise ValueError(REPOSITORY_LOOKUP_FAILED_MESSAGE)
-        raise ValueError(REPOSITORY_INVALID_MESSAGE)
-    if response.status_code >= 400:
-        raise ValueError(REPOSITORY_LOOKUP_FAILED_MESSAGE)
-
-    try:
-        data = response.json()
-    except ValueError as error:
-        raise ValueError(REPOSITORY_LOOKUP_FAILED_MESSAGE) from error
-
-    if (
-        not isinstance(data, dict)
-        or not isinstance(data.get("id"), int)
-        or not data.get("name")
-        or not data.get("full_name")
-        or not data.get("html_url")
-        or data.get("private") is True
-    ):
-        raise ValueError(REPOSITORY_INVALID_MESSAGE)
+        data = fetch_repository_identity(full_name)
+    except GitHubClientError as error:
+        raise _registration_error(error) from error
+    if Repository.objects.filter(github_id=data.github_id).exists():
+        raise ValueError(REPOSITORY_ALREADY_LINKED_MESSAGE)
     return data
 
 
-def update_project_repository(project, repository_url):
+def prepare_project_repository_update(
+    project: Project,
+    repository_url: str | None,
+) -> GitHubRepositoryIdentity | None:
+    repository = getattr(project, "repository", None)
+    if repository is not None:
+        if repository_url != repository.html_url:
+            raise ValueError(REPOSITORY_CHANGE_NOT_ALLOWED_MESSAGE)
+        return None
+    if not repository_url:
+        return None
+    return prepare_repository_registration(repository_url)
+
+
+def update_project_repository(
+    project: Project,
+    repository_url: str | None,
+    *,
+    previous_project_status: str | None = None,
+    repository_data: GitHubRepositoryIdentity | None = None,
+) -> None:
     repository = getattr(project, "repository", None)
     if repository:
         if repository_url != repository.html_url:
             raise ValueError(REPOSITORY_CHANGE_NOT_ALLOWED_MESSAGE)
+        if (
+            previous_project_status == project.Status.INACTIVE
+            and project.status == project.Status.ACTIVE
+        ):
+            transaction.on_commit(
+                lambda: enqueue_repository_refresh(repository.pk),
+                robust=True,
+            )
         return
     if not repository_url:
         return
 
-    full_name = _parse_repository_identity(repository_url)
-    if Repository.objects.filter(full_name__iexact=full_name).exists():
+    data = repository_data or prepare_repository_registration(repository_url)
+    if Repository.objects.filter(full_name__iexact=data.full_name).exists():
+        raise ValueError(REPOSITORY_ALREADY_LINKED_MESSAGE)
+    if Repository.objects.filter(github_id=data.github_id).exists():
         raise ValueError(REPOSITORY_ALREADY_LINKED_MESSAGE)
 
-    data = _get_repository_data(full_name)
-    if Repository.objects.filter(github_id=data["id"]).exists():
-        raise ValueError(REPOSITORY_ALREADY_LINKED_MESSAGE)
-
-    Repository.objects.create(
-        project=project,
-        github_id=data["id"],
-        name=data["name"],
-        full_name=data["full_name"],
-        html_url=data["html_url"],
+    try:
+        repository = Repository.objects.create(
+            project=project,
+            github_id=data.github_id,
+            name=data.name,
+            full_name=data.full_name,
+            html_url=data.html_url,
+        )
+    except IntegrityError as error:
+        raise RepositoryRegistrationError(
+            "INTERNAL_SERVER_ERROR",
+            REPOSITORY_SAVE_FAILED_MESSAGE,
+        ) from error
+    transaction.on_commit(
+        lambda: enqueue_repository_refresh(repository.pk),
+        robust=True,
     )

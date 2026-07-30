@@ -26,19 +26,15 @@ export interface ProjectMemberUpdateInput {
 
 export interface Repository {
   id: number;
-  githubId?: number | null;
+  githubId: number;
   name: string;
   fullName: string;
   description?: string | null;
   stars: number;
   forks: number;
   language?: string | null;
-  topics?: string[];
   htmlUrl: string;
-  updatedAt?: string | null;
   fetchedAt: string | null;
-  refreshStatus?: "SUCCESS" | "FAILED" | null;
-  lastErrorCode?: string | null;
 }
 
 export interface Project {
@@ -85,6 +81,14 @@ export interface ProjectInput {
   presentationUrl?: string | null;
   techStack: string[];
   usedOpenSource: string[];
+}
+
+export interface ProjectCreateDetail {
+  repositoryRegistration?: {
+    status: "FAILED";
+    code: string;
+    message: string;
+  };
 }
 
 export interface ProjectUpdateInput extends ProjectInput {

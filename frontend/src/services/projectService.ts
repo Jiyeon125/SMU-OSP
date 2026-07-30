@@ -15,12 +15,17 @@ import { ApiResponse, ERROR_CODES, PaginationDetail } from "../types/response";
 import {
   Project,
   ProjectApplicationHistory,
+  ProjectCreateDetail,
   ProjectDetail,
   ProjectDetailMember,
   ProjectInput,
   ProjectMemberUpdateInput,
   ProjectUpdateInput,
 } from "../types/project";
+
+export function canReactivateProjectRepository(project: ProjectDetail): boolean {
+  return project.status === "INACTIVE" && project.membershipRole === "OWNER";
+}
 
 export interface ListParams {
   start?: number;
@@ -176,11 +181,14 @@ export async function applyToProject(
 
 export async function createProject(
   input: ProjectInput
-): Promise<ApiResponse<Project>> {
+): Promise<ApiResponse<Project, ProjectCreateDetail>> {
   try {
     return await createProjectApi(input);
   } catch (e) {
-    return toApiResponse<Project>(e, "프로젝트 등록 중 오류가 발생했습니다.");
+    return toApiResponse<Project>(
+      e,
+      "프로젝트 등록 중 오류가 발생했습니다."
+    ) as ApiResponse<Project, ProjectCreateDetail>;
   }
 }
 
@@ -207,6 +215,21 @@ export async function finishProject(
     techStack: project.techStack,
     usedOpenSource: project.usedOpenSource,
     status: "FINISHED",
+  });
+}
+
+export async function reactivateProject(
+  project: ProjectDetail
+): Promise<ApiResponse<null>> {
+  return updateProject(String(project.id), {
+    name: project.name,
+    description: project.description,
+    repositoryUrl: project.repository?.htmlUrl || null,
+    demoUrl: project.demoUrl || null,
+    presentationUrl: project.presentationUrl || null,
+    techStack: project.techStack,
+    usedOpenSource: project.usedOpenSource,
+    status: "ACTIVE",
   });
 }
 
