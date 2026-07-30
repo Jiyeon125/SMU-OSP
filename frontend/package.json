@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@ark-ui/react": "4.6.0",
     "@chakra-ui/react": "^3.2.5",
     "@chakra-ui/theme": "^3.4.6",
     "@chakra-ui/theme-tools": "^2.2.6",

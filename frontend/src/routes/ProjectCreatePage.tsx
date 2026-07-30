@@ -12,6 +12,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import LogInButton from "../components/LogInButton";
+import ProjectLanguageSelect from "../components/ProjectLanguageSelect";
 import { Button } from "../components/ui/button";
 import useUser from "../lib/useUser";
 import { createProject, getProject } from "../services/projectService";
@@ -43,7 +44,7 @@ export default function ProjectCreatePage() {
   const [repositoryUrl, setRepositoryUrl] = useState("");
   const [demoUrl, setDemoUrl] = useState("");
   const [presentationUrl, setPresentationUrl] = useState("");
-  const [techStack, setTechStack] = useState("");
+  const [techStack, setTechStack] = useState<string[]>([]);
   const [usedOpenSource, setUsedOpenSource] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -94,7 +95,7 @@ export default function ProjectCreatePage() {
       repositoryUrl: optionalUrl(repositoryUrl),
       demoUrl: optionalUrl(demoUrl),
       presentationUrl: optionalUrl(presentationUrl),
-      techStack: parseCommaList(techStack),
+      techStack,
       usedOpenSource: parseCommaList(usedOpenSource),
     });
   };
@@ -224,12 +225,10 @@ export default function ProjectCreatePage() {
             </SimpleGrid>
 
             <SimpleGrid columns={{ base: 1, md: 2 }} gap={4}>
-              <Field label="기술 스택">
-                <Input
+              <Field label="사용 언어">
+                <ProjectLanguageSelect
                   value={techStack}
-                  onChange={(e) => setTechStack(e.target.value)}
-                  placeholder="React, Django, PostgreSQL"
-                  maxLength={MAX_PROJECT_LIST_INPUT_LENGTH}
+                  onChange={setTechStack}
                   disabled={mutation.isPending}
                 />
               </Field>

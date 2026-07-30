@@ -5,6 +5,7 @@ import {
   deleteProject as deleteProjectApi,
   deleteProjectMembership,
   getProject as getProjectApi,
+  getProjectLanguages,
   getProjectMembers,
   getProjectMemberships,
   getProjects,
@@ -76,6 +77,17 @@ export async function getProject(id: string): Promise<ApiResponse<ProjectDetail>
     return toApiResponse<ProjectDetail>(
       e,
       "프로젝트 조회 중 오류가 발생했습니다."
+    );
+  }
+}
+
+export async function listProjectLanguages(): Promise<ApiResponse<string[]>> {
+  try {
+    return await getProjectLanguages();
+  } catch (e) {
+    return toApiResponse<string[]>(
+      e,
+      "사용 언어 목록을 불러오는 중 오류가 발생했습니다."
     );
   }
 }

@@ -12,6 +12,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import LogInButton from "../components/LogInButton";
+import ProjectLanguageSelect from "../components/ProjectLanguageSelect";
 import { Button } from "../components/ui/button";
 import useUser from "../lib/useUser";
 import { getProject, updateProject } from "../services/projectService";
@@ -56,7 +57,7 @@ export default function ProjectEditPage() {
   const [repositoryUrl, setRepositoryUrl] = useState("");
   const [demoUrl, setDemoUrl] = useState("");
   const [presentationUrl, setPresentationUrl] = useState("");
-  const [techStack, setTechStack] = useState("");
+  const [techStack, setTechStack] = useState<string[]>([]);
   const [usedOpenSource, setUsedOpenSource] = useState("");
   const [initializedProjectId, setInitializedProjectId] = useState<number>();
   const [errorMessage, setErrorMessage] = useState("");
@@ -84,7 +85,7 @@ export default function ProjectEditPage() {
     );
     setDemoUrl(project.demoUrl || "");
     setPresentationUrl(project.presentationUrl || "");
-    setTechStack(project.techStack.join(", "));
+    setTechStack(project.techStack);
     setUsedOpenSource(project.usedOpenSource.join(", "));
     if (!project.repository && retryRepositoryError) {
       setErrorMessage(retryRepositoryError);
@@ -180,7 +181,7 @@ export default function ProjectEditPage() {
       repositoryUrl: optionalUrl(repositoryUrl),
       demoUrl: optionalUrl(demoUrl),
       presentationUrl: optionalUrl(presentationUrl),
-      techStack: parseCommaList(techStack),
+      techStack,
       usedOpenSource: parseCommaList(usedOpenSource),
       status: "ACTIVE",
     });
@@ -265,12 +266,10 @@ export default function ProjectEditPage() {
             </SimpleGrid>
 
             <SimpleGrid columns={{ base: 1, md: 2 }} gap={4}>
-              <Field label="기술 스택">
-                <Input
+              <Field label="사용 언어">
+                <ProjectLanguageSelect
                   value={techStack}
-                  onChange={(e) => setTechStack(e.target.value)}
-                  placeholder="React, Django, PostgreSQL"
-                  maxLength={MAX_PROJECT_LIST_INPUT_LENGTH}
+                  onChange={setTechStack}
                   disabled={mutation.isPending}
                 />
               </Field>
