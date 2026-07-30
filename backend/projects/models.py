@@ -112,7 +112,6 @@ class Project(CommonModel):
         related_name="projects",
         blank=True,
     )
-    used_open_source = models.JSONField(default=list, blank=True)
     status = models.CharField(
         max_length=30,
         choices=Status.choices,
