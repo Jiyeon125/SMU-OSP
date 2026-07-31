@@ -1,21 +1,25 @@
 import {
   Box,
+  createListCollection,
   Flex,
   HStack,
   Input,
+  Portal,
+  Select,
   SimpleGrid,
   Spinner,
   Text,
   VStack,
 } from "@chakra-ui/react";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { LuArrowUpDown, LuFilter, LuSearch } from "react-icons/lu";
-import { Link as RouterLink } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { LuSearch } from "react-icons/lu";
+import { Link as RouterLink, useSearchParams } from "react-router-dom";
 import ProjectApplicationHistory from "../components/ProjectApplicationHistory";
 import ProjectCard, {
   MembershipRolePill,
 } from "../components/ProjectCard";
+import ProjectLanguageSelect from "../components/ProjectLanguageSelect";
 import { Button } from "../components/ui/button";
 import { InputGroup } from "../components/ui/input-group";
 import useUser from "../lib/useUser";
@@ -23,10 +27,38 @@ import { listProjects } from "../services/projectService";
 import { formatDateKST } from "../utils/date";
 import { getPageWindow } from "../utils/pagination";
 
-const CARD_PAGE_SIZE = 12;
-const BOARD_PAGE_SIZE = 20;
+const PROJECT_PAGE_SIZE = 12;
 const PAGE_WINDOW_SIZE = 10;
-type ProjectScope = "all" | "owned" | "joined" | "applications";
+type ProjectScope =
+  | "all"
+  | "owned"
+  | "joined"
+  | "finished"
+  | "applications";
+type ProjectFilterStatus = "" | "ACTIVE" | "INACTIVE" | "FINISHED";
+type ProjectSort = "latest" | "name";
+
+const PROJECT_SCOPES: ProjectScope[] = [
+  "all",
+  "owned",
+  "joined",
+  "finished",
+  "applications",
+];
+const PROJECT_STATUS_OPTIONS = createListCollection({
+  items: [
+    { label: "전체 상태", value: "ALL" },
+    { label: "진행 중", value: "ACTIVE" },
+    { label: "비활성", value: "INACTIVE" },
+    { label: "완료", value: "FINISHED" },
+  ],
+});
+const PROJECT_SORT_OPTIONS = createListCollection({
+  items: [
+    { label: "최신순", value: "latest" },
+    { label: "이름순", value: "name" },
+  ],
+});
 
 const SCOPE_CONTENT: Record<
   ProjectScope,
@@ -46,6 +78,11 @@ const SCOPE_CONTENT: Record<
     title: "참여 중인 프로젝트",
     description: "내가 팀원으로 참여 중인 프로젝트를 확인해 보세요.",
     emptyMessage: "참여 중인 프로젝트가 없습니다.",
+  },
+  finished: {
+    title: "완료된 프로젝트",
+    description: "내가 팀장 또는 팀원으로 참여했던 완료 프로젝트입니다.",
+    emptyMessage: "완료된 프로젝트가 없습니다.",
   },
   applications: {
     title: "참여 신청 내역",
@@ -92,20 +129,104 @@ function ProjectTreeItem({
 export default function ProjectListPage() {
   const { isLoggedIn, userLoading } = useUser();
   const [viewMode, setViewMode] = useState<"cards" | "board">("cards");
-  const [projectScope, setProjectScope] = useState<ProjectScope>("all");
-  const [page, setPage] = useState(1);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const scopeParam = searchParams.get("scope");
+  const parsedPage = Number(searchParams.get("page"));
+  const page =
+    Number.isInteger(parsedPage) && parsedPage > 0 ? parsedPage : 1;
+  const keyword = searchParams.get("keyword") ?? "";
+  const techStack = searchParams.get("techStack") ?? "";
+  const statusParam = searchParams.get("status");
+  const projectStatus: ProjectFilterStatus = [
+    "ACTIVE",
+    "INACTIVE",
+    "FINISHED",
+  ].includes(statusParam ?? "")
+    ? (statusParam as ProjectFilterStatus)
+    : "";
+  const projectSort: ProjectSort =
+    searchParams.get("sort") === "name" ? "name" : "latest";
+  const [keywordInput, setKeywordInput] = useState(keyword);
+  const [techStackInput, setTechStackInput] =
+    useState<string[]>(techStack.split(",").filter(Boolean));
+  const projectScope: ProjectScope = PROJECT_SCOPES.includes(
+    scopeParam as ProjectScope
+  )
+    ? (scopeParam as ProjectScope)
+    : "all";
+  const effectiveStatus =
+    projectScope === "finished" ? "FINISHED" : projectStatus;
 
-  const pageSize = viewMode === "cards" ? CARD_PAGE_SIZE : BOARD_PAGE_SIZE;
+  useEffect(() => {
+    setKeywordInput(keyword);
+    setTechStackInput(techStack.split(",").filter(Boolean));
+  }, [keyword, techStack]);
+
+  const selectScope = (scope: ProjectScope) => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (scope === "all") nextParams.delete("scope");
+    else nextParams.set("scope", scope);
+    if (scope !== "all" && nextParams.get("status") === "FINISHED") {
+      nextParams.delete("status");
+    }
+    nextParams.delete("page");
+    setSearchParams(nextParams);
+  };
+  const updateFilter = (name: string, value: string) => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (value) nextParams.set(name, value);
+    else nextParams.delete(name);
+    nextParams.delete("page");
+    setSearchParams(nextParams);
+  };
+  const applyTextFilters = () => {
+    const nextParams = new URLSearchParams(searchParams);
+    const normalizedTechStack = techStackInput.join(",");
+    if (keywordInput.trim()) nextParams.set("keyword", keywordInput.trim());
+    else nextParams.delete("keyword");
+    if (normalizedTechStack) nextParams.set("techStack", normalizedTechStack);
+    else nextParams.delete("techStack");
+    nextParams.delete("page");
+    setSearchParams(nextParams);
+  };
+  const resetFilters = () => {
+    const nextParams = new URLSearchParams();
+    if (projectScope !== "all") nextParams.set("scope", projectScope);
+    setSearchParams(nextParams);
+  };
+  const updatePage = (nextPage: number) => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (nextPage <= 1) nextParams.delete("page");
+    else nextParams.set("page", String(nextPage));
+    setSearchParams(nextParams);
+  };
+
+  const pageSize = PROJECT_PAGE_SIZE;
   const start = (page - 1) * pageSize;
 
   const { data, isLoading } = useQuery({
-    queryKey: ["projects", projectScope, viewMode, start, pageSize],
+    queryKey: [
+      "projects",
+      projectScope,
+      start,
+      pageSize,
+      keyword,
+      techStack,
+      effectiveStatus,
+      projectSort,
+    ],
     queryFn: () =>
       listProjects({
         start,
         limit: pageSize,
-        owned: projectScope === "owned",
-        joined: projectScope === "joined",
+        owned:
+          projectScope === "owned" || projectScope === "finished",
+        joined:
+          projectScope === "joined" || projectScope === "finished",
+        keyword,
+        techStack,
+        status: effectiveStatus || undefined,
+        sort: projectSort,
       }),
     enabled: projectScope !== "applications",
   });
@@ -117,6 +238,11 @@ export default function ProjectListPage() {
   const hasPreviousGroup = pageNumbers[0] > 1;
   const hasNextGroup = pageNumbers[pageNumbers.length - 1] < totalPages;
   const scopeContent = SCOPE_CONTENT[projectScope];
+  const hasFilters =
+    !!keyword ||
+    !!techStack ||
+    (projectScope !== "finished" && !!effectiveStatus) ||
+    projectSort !== "latest";
 
   return (
     <Box px={{ base: 4, md: 10 }} py={6} maxW={"1280px"} mx={"auto"}>
@@ -146,10 +272,7 @@ export default function ProjectListPage() {
               <VStack alignItems={"stretch"} gap={1}>
                 <ProjectTreeItem
                   active={projectScope === "all"}
-                  onClick={() => {
-                    setProjectScope("all");
-                    setPage(1);
-                  }}
+                  onClick={() => selectScope("all")}
                 >
                   전체 프로젝트
                 </ProjectTreeItem>
@@ -170,31 +293,28 @@ export default function ProjectListPage() {
                 >
                   <VStack alignItems={"stretch"} gap={1}>
                     <ProjectTreeItem
+                      active={projectScope === "applications"}
+                      onClick={() => selectScope("applications")}
+                    >
+                      참여 신청 내역
+                    </ProjectTreeItem>
+                    <ProjectTreeItem
                       active={projectScope === "owned"}
-                      onClick={() => {
-                        setProjectScope("owned");
-                        setPage(1);
-                      }}
+                      onClick={() => selectScope("owned")}
                     >
                       운영 중인 프로젝트
                     </ProjectTreeItem>
                     <ProjectTreeItem
                       active={projectScope === "joined"}
-                      onClick={() => {
-                        setProjectScope("joined");
-                        setPage(1);
-                      }}
+                      onClick={() => selectScope("joined")}
                     >
                       참여 중인 프로젝트
                     </ProjectTreeItem>
                     <ProjectTreeItem
-                      active={projectScope === "applications"}
-                      onClick={() => {
-                        setProjectScope("applications");
-                        setPage(1);
-                      }}
+                      active={projectScope === "finished"}
+                      onClick={() => selectScope("finished")}
                     >
-                      참여 신청 내역
+                      완료된 프로젝트
                     </ProjectTreeItem>
                   </VStack>
                 </Box>
@@ -236,59 +356,143 @@ export default function ProjectListPage() {
           <Flex
             p={3}
             justifyContent={"space-between"}
-            alignItems={{ base: "stretch", lg: "center" }}
-            direction={{ base: "column", lg: "row" }}
+            alignItems={{ base: "stretch", xl: "center" }}
+            direction={{ base: "column", xl: "row" }}
             gap={3}
             borderWidth={1}
             borderColor={"smu.gray"}
             borderRadius={"lg"}
             bg={"white"}
           >
-            <Flex alignItems={"center"} flexWrap={"wrap"} gap={2} flex={1}>
+            <Flex
+              as="form"
+              alignItems={"center"}
+              flexWrap={"wrap"}
+              gap={2}
+              flex={1}
+              onSubmit={(event) => {
+                event.preventDefault();
+                applyTextFilters();
+              }}
+            >
               <InputGroup
                 startElement={<LuSearch />}
-                width={{ base: "100%", sm: "260px" }}
+                width={{ base: "100%", sm: "220px", lg: "auto" }}
+                minWidth={{ lg: "140px" }}
+                flex={{ lg: "1 1 150px" }}
               >
                 <Input
                   size={"sm"}
                   placeholder="프로젝트 검색"
-                  disabled
-                  _disabled={{ opacity: 1, cursor: "not-allowed" }}
+                  value={keywordInput}
+                  maxLength={100}
+                  onChange={(event) => setKeywordInput(event.target.value)}
                 />
               </InputGroup>
-              <Button
-                size={"sm"}
-                variant={"outline"}
-                disabled
-                _disabled={{ opacity: 0.75, cursor: "not-allowed" }}
-              >
-                <LuArrowUpDown />
-                정렬
-              </Button>
-              <Button
-                size={"sm"}
-                variant={"outline"}
-                disabled
-                _disabled={{ opacity: 0.75, cursor: "not-allowed" }}
-              >
-                <LuFilter />
-                필터
-              </Button>
               <Box
-                px={2}
-                py={0.5}
-                borderRadius={"full"}
-                bg={"#f1f3f5"}
-                color={"smu.darkGray"}
-                fontSize={"xs"}
+                width={{ base: "100%", sm: "220px", lg: "auto" }}
+                minWidth={{ lg: "150px" }}
+                flex={{ lg: "1 1 160px" }}
               >
-                UI 준비 중
+                <ProjectLanguageSelect
+                  size="sm"
+                  value={techStackInput}
+                  onChange={setTechStackInput}
+                  placeholder="사용 언어"
+                />
               </Box>
+              {projectScope !== "finished" && (
+                <Select.Root
+                  size="sm"
+                  width={{ base: "100%", sm: "140px", lg: "120px" }}
+                  flexShrink={0}
+                  collection={PROJECT_STATUS_OPTIONS}
+                  value={[effectiveStatus || "ALL"]}
+                  onValueChange={({ value }) =>
+                    updateFilter(
+                      "status",
+                      value[0] === "ALL" ? "" : value[0]
+                    )
+                  }
+                >
+                  <Select.Control>
+                    <Select.Trigger aria-label="프로젝트 상태 필터">
+                      <Select.ValueText />
+                    </Select.Trigger>
+                    <Select.IndicatorGroup>
+                      <Select.Indicator />
+                    </Select.IndicatorGroup>
+                  </Select.Control>
+                  <Portal>
+                    <Select.Positioner>
+                      <Select.Content bg="white" shadow="md">
+                        {PROJECT_STATUS_OPTIONS.items
+                          .filter(
+                            (option) =>
+                              option.value !== "FINISHED" ||
+                              projectScope === "all"
+                          )
+                          .map((option) => (
+                            <Select.Item item={option} key={option.value}>
+                              {option.label}
+                              <Select.ItemIndicator />
+                            </Select.Item>
+                          ))}
+                      </Select.Content>
+                    </Select.Positioner>
+                  </Portal>
+                </Select.Root>
+              )}
+              <Select.Root
+                size="sm"
+                width={{ base: "100%", sm: "130px", lg: "105px" }}
+                flexShrink={0}
+                collection={PROJECT_SORT_OPTIONS}
+                value={[projectSort]}
+                onValueChange={({ value }) =>
+                  updateFilter("sort", value[0])
+                }
+              >
+                <Select.Control>
+                  <Select.Trigger aria-label="프로젝트 정렬">
+                    <Select.ValueText />
+                  </Select.Trigger>
+                  <Select.IndicatorGroup>
+                    <Select.Indicator />
+                  </Select.IndicatorGroup>
+                </Select.Control>
+                <Portal>
+                  <Select.Positioner>
+                    <Select.Content bg="white" shadow="md">
+                      {PROJECT_SORT_OPTIONS.items.map((option) => (
+                        <Select.Item item={option} key={option.value}>
+                          {option.label}
+                          <Select.ItemIndicator />
+                        </Select.Item>
+                      ))}
+                    </Select.Content>
+                  </Select.Positioner>
+                </Portal>
+              </Select.Root>
+              <Button size="sm" type="submit" bg="smu.blue">
+                검색
+              </Button>
+              {hasFilters && (
+                <Button
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={resetFilters}
+                >
+                  초기화
+                </Button>
+              )}
             </Flex>
 
             <HStack
               p={1}
               gap={1}
+              width={"fit-content"}
               flexShrink={0}
               borderRadius={"md"}
               bg={"#f1f3f5"}
@@ -297,10 +501,7 @@ export default function ProjectListPage() {
                 size={"sm"}
                 minW={"72px"}
                 variant={viewMode === "cards" ? "solid" : "ghost"}
-                onClick={() => {
-                  setViewMode("cards");
-                  setPage(1);
-                }}
+                onClick={() => setViewMode("cards")}
               >
                 카드
               </Button>
@@ -308,10 +509,7 @@ export default function ProjectListPage() {
                 size={"sm"}
                 minW={"72px"}
                 variant={viewMode === "board" ? "solid" : "ghost"}
-                onClick={() => {
-                  setViewMode("board");
-                  setPage(1);
-                }}
+                onClick={() => setViewMode("board")}
               >
                 게시판
               </Button>
@@ -331,7 +529,11 @@ export default function ProjectListPage() {
             borderRadius={"lg"}
             bg={"#f7f7f7"}
           >
-            <Text color={"smu.darkGray"}>{scopeContent.emptyMessage}</Text>
+            <Text color={"smu.darkGray"}>
+              {hasFilters
+                ? "검색 조건에 맞는 프로젝트가 없습니다."
+                : scopeContent.emptyMessage}
+            </Text>
           </Box>
         ) : (
           <>
@@ -386,7 +588,9 @@ export default function ProjectListPage() {
                       <Box as="tr" key={p.id}>
                         <Box as="td" p={3} borderBottomWidth={1} borderBottomColor={"smu.gray"}>
                           <Text fontWeight={"bold"} color={"smu.blue"}>
-                            {p.name}
+                            <RouterLink to={`/projects/${p.id}`}>
+                              {p.name}
+                            </RouterLink>
                           </Text>
                           <Text fontSize={"xs"} color={"smu.darkGray"} lineClamp={1}>
                             {p.description}
@@ -422,7 +626,11 @@ export default function ProjectListPage() {
                           )}
                         </Box>
                         <Box as="td" p={3} borderBottomWidth={1} borderBottomColor={"smu.gray"}>
-                          <Text fontSize={"sm"}>{p.repository?.language || "-"}</Text>
+                          <Text fontSize={"sm"}>
+                            {p.repository?.languages?.join(", ") ||
+                              p.repository?.language ||
+                              "-"}
+                          </Text>
                         </Box>
                         <Box as="td" p={3} borderBottomWidth={1} borderBottomColor={"smu.gray"}>
                           <Text fontSize={"sm"}>{p.repository?.stars ?? "-"}</Text>
@@ -460,7 +668,7 @@ export default function ProjectListPage() {
                 size={"sm"}
                 variant={"outline"}
                 disabled={!pagination?.hasPrevious}
-                onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                onClick={() => updatePage(Math.max(1, page - 1))}
               >
                 이전
               </Button>
@@ -468,7 +676,7 @@ export default function ProjectListPage() {
                 <Button
                   size={"sm"}
                   variant={"outline"}
-                  onClick={() => setPage(pageNumbers[0] - 1)}
+                  onClick={() => updatePage(pageNumbers[0] - 1)}
                 >
                   이전 10
                 </Button>
@@ -478,7 +686,7 @@ export default function ProjectListPage() {
                   key={pageNumber}
                   size={"sm"}
                   variant={pageNumber === page ? "solid" : "outline"}
-                  onClick={() => setPage(pageNumber)}
+                  onClick={() => updatePage(pageNumber)}
                 >
                   {pageNumber}
                 </Button>
@@ -487,7 +695,9 @@ export default function ProjectListPage() {
                 <Button
                   size={"sm"}
                   variant={"outline"}
-                  onClick={() => setPage(pageNumbers[pageNumbers.length - 1] + 1)}
+                  onClick={() =>
+                    updatePage(pageNumbers[pageNumbers.length - 1] + 1)
+                  }
                 >
                   다음 10
                 </Button>
@@ -496,7 +706,7 @@ export default function ProjectListPage() {
                 size={"sm"}
                 variant={"outline"}
                 disabled={!pagination?.hasNext}
-                onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+                onClick={() => updatePage(Math.min(totalPages, page + 1))}
               >
                 다음
               </Button>

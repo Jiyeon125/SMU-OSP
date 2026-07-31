@@ -13,6 +13,12 @@ import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import ProjectLeaveDialog from "../components/ProjectLeaveDialog";
 import ProjectMemberManagementDialog from "../components/ProjectMemberManagementDialog";
 import { Button } from "../components/ui/button";
+import {
+  MenuContent,
+  MenuItem,
+  MenuRoot,
+  MenuTrigger,
+} from "../components/ui/menu";
 import useUser from "../lib/useUser";
 import {
   DialogActionTrigger,
@@ -27,10 +33,12 @@ import {
 } from "../components/ui/dialog";
 import {
   applyToProject,
+  cancelProjectApplication,
   canReactivateProjectRepository,
   deleteProject,
   finishProject,
   getProject,
+  getProjectApplicationAvailability,
   leaveProject,
   listProjectApplications,
   listProjectMembers,
@@ -44,7 +52,6 @@ import {
 import type { ProjectDetailMember } from "../types/project";
 import { formatDateTimeKST } from "../utils/date";
 
-const MAX_REAPPLICATIONS = 5;
 function Section({
   title,
   children,
@@ -272,6 +279,96 @@ function ProjectMemberRemoveDialog({
   );
 }
 
+type ProjectAction = "apply" | "cancelApplication" | "finish" | "delete";
+
+const PROJECT_ACTION_CONTENT: Record<
+  ProjectAction,
+  {
+    title: string;
+    description: string;
+    confirmLabel: string;
+    loadingText: string;
+    destructive?: boolean;
+  }
+> = {
+  apply: {
+    title: "참가 신청",
+    description: "이 프로젝트에 참가 신청하시겠습니까?",
+    confirmLabel: "신청",
+    loadingText: "신청 중",
+  },
+  cancelApplication: {
+    title: "참가 신청 취소",
+    description: "참가 신청을 취소하시겠습니까?",
+    confirmLabel: "신청 취소",
+    loadingText: "취소 중",
+    destructive: true,
+  },
+  finish: {
+    title: "프로젝트 완료",
+    description:
+      "프로젝트를 완료하시겠습니까? 완료 후 프로젝트 수정과 참여 신청이 제한됩니다.",
+    confirmLabel: "완료",
+    loadingText: "완료 처리 중",
+  },
+  delete: {
+    title: "프로젝트 삭제",
+    description:
+      "프로젝트를 삭제하시겠습니까? 삭제한 프로젝트는 복구할 수 없습니다.",
+    confirmLabel: "삭제",
+    loadingText: "삭제 중",
+    destructive: true,
+  },
+};
+
+function ProjectActionConfirmDialog({
+  action,
+  setAction,
+  onConfirm,
+  isPending,
+}: {
+  action: ProjectAction | null;
+  setAction: (action: ProjectAction | null) => void;
+  onConfirm: () => void;
+  isPending: boolean;
+}) {
+  const content = PROJECT_ACTION_CONTENT[action ?? "finish"];
+
+  return (
+    <DialogRoot
+      open={action !== null}
+      onOpenChange={(event) => !event.open && setAction(null)}
+      closeOnInteractOutside={false}
+      placement="center"
+      role="alertdialog"
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{content.title}</DialogTitle>
+        </DialogHeader>
+        <DialogBody>
+          <DialogDescription>{content.description}</DialogDescription>
+        </DialogBody>
+        <DialogFooter>
+          <DialogActionTrigger asChild>
+            <Button variant="outline">취소</Button>
+          </DialogActionTrigger>
+          <Button
+            colorPalette={content.destructive ? "red" : undefined}
+            bg={content.destructive ? undefined : "smu.blue"}
+            loading={isPending}
+            loadingText={content.loadingText}
+            onClick={onConfirm}
+          >
+            {content.confirmLabel}
+          </Button>
+        </DialogFooter>
+        <DialogCloseTrigger />
+      </DialogContent>
+    </DialogRoot>
+  );
+}
+
 function ExternalTextLink({
   href,
   children,
@@ -309,7 +406,12 @@ export default function ProjectDetailPage() {
   );
   const [leaveMessage, setLeaveMessage] = useState("");
   const [applicationMessage, setApplicationMessage] = useState("");
+  const [applicationMessageFailed, setApplicationMessageFailed] =
+    useState(false);
   const [projectActionMessage, setProjectActionMessage] = useState("");
+  const [projectAction, setProjectAction] = useState<ProjectAction | null>(
+    null
+  );
   const [repositoryActionMessage, setRepositoryActionMessage] = useState("");
   const [repositoryActionFailed, setRepositoryActionFailed] = useState(false);
 
@@ -362,11 +464,32 @@ export default function ProjectDetailPage() {
   const applicationMutation = useMutation({
     mutationFn: (projectId: number) => applyToProject(projectId),
     onSuccess: async (response) => {
-      if (response.status !== "SUCCESS") {
+      const failed = response.status !== "SUCCESS";
+      setApplicationMessageFailed(failed);
+      if (failed) {
         setApplicationMessage(response.detail.message);
         return;
       }
       setApplicationMessage("참가 신청이 완료되어 승인 대기 중입니다.");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["project", id] }),
+        queryClient.invalidateQueries({
+          queryKey: ["project-application-history"],
+        }),
+      ]);
+    },
+  });
+
+  const cancelApplicationMutation = useMutation({
+    mutationFn: (projectId: number) => cancelProjectApplication(projectId),
+    onSuccess: async (response) => {
+      const failed = response.status !== "SUCCESS";
+      setApplicationMessageFailed(failed);
+      if (failed) {
+        setApplicationMessage(response.detail.message);
+        return;
+      }
+      setApplicationMessage("참가 신청을 취소했습니다.");
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["project", id] }),
         queryClient.invalidateQueries({
@@ -417,6 +540,7 @@ export default function ProjectDetailPage() {
           queryKey: ["project-application-history"],
         }),
       ]);
+      navigate("/projects?scope=finished");
     },
   });
 
@@ -446,6 +570,10 @@ export default function ProjectDetailPage() {
         setProjectActionMessage(response.detail.message);
         return;
       }
+      queryClient.removeQueries({
+        queryKey: ["project", id],
+        exact: true,
+      });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["projects"] }),
         queryClient.invalidateQueries({
@@ -499,17 +627,16 @@ export default function ProjectDetailPage() {
   const hasLoadedApplicationHistory =
     applicationHistoryQuery.data?.status === "SUCCESS";
   const latestApplication = applicationHistory[0];
-  const hasActiveApplication =
-    latestApplication?.status === "PENDING" ||
-    latestApplication?.status === "JOINED";
-  const canApply =
-    isLoggedIn &&
-    hasLoadedApplicationHistory &&
-    project.status === "ACTIVE" &&
-    project.membershipRole == null &&
-    !hasActiveApplication &&
-    applicationHistory.length <= MAX_REAPPLICATIONS &&
-    project.memberCount < project.maxMembers;
+  const {
+    canApply,
+    unavailableReason: applicationUnavailableReason,
+  } = getProjectApplicationAvailability({
+    project,
+    applicationHistory,
+    isLoggedIn,
+    userLoading,
+    hasLoadedApplicationHistory,
+  });
   const managedMembersResponse = managedMembersQuery.data;
   const pendingCount =
     managedMembersResponse?.status === "SUCCESS"
@@ -530,13 +657,6 @@ export default function ProjectDetailPage() {
     });
   };
 
-  const apply = () => {
-    setApplicationMessage("");
-    if (window.confirm("이 프로젝트에 참가 신청하시겠습니까?")) {
-      applicationMutation.mutate(project.id);
-    }
-  };
-
   const removeMember = (description: string) => {
     if (!removeTarget) return;
     removeMemberMutation.mutate({
@@ -544,6 +664,26 @@ export default function ProjectDetailPage() {
       memberId: removeTarget.id,
       description,
     });
+  };
+
+  const confirmProjectAction = () => {
+    const action = projectAction;
+    setProjectAction(null);
+    if (action === "apply" || action === "cancelApplication") {
+      setApplicationMessage("");
+      setApplicationMessageFailed(false);
+    } else {
+      setProjectActionMessage("");
+    }
+    if (action === "apply") {
+      applicationMutation.mutate(project.id);
+    } else if (action === "cancelApplication") {
+      cancelApplicationMutation.mutate(project.id);
+    } else if (action === "finish") {
+      finishProjectMutation.mutate();
+    } else if (action === "delete") {
+      deleteProjectMutation.mutate();
+    }
   };
 
   return (
@@ -568,51 +708,56 @@ export default function ProjectDetailPage() {
               <Button
                 bg={"smu.blue"}
                 disabled={applicationMutation.isPending}
-                onClick={apply}
+                onClick={() => setProjectAction("apply")}
               >
                 {applicationMutation.isPending ? "신청 중..." : "참가 신청"}
               </Button>
             )}
-            {project.canEdit && (
-              <Button
-                variant="outline"
-                disabled={finishProjectMutation.isPending}
-                onClick={() => {
-                  if (window.confirm("프로젝트를 완료하시겠습니까?")) {
-                    setProjectActionMessage("");
-                    finishProjectMutation.mutate();
-                  }
-                }}
-              >
-                프로젝트 완료
-              </Button>
+            {applicationUnavailableReason && (
+              <VStack alignItems="flex-end" gap={1}>
+                <Button disabled>참가 신청</Button>
+                <Text fontSize="xs" color="smu.darkGray">
+                  {applicationUnavailableReason}
+                </Text>
+              </VStack>
             )}
-            {canDeleteProject && (
-              <Button
-                colorPalette="red"
-                variant="outline"
-                disabled={deleteProjectMutation.isPending}
-                onClick={() => {
-                  if (
-                    window.confirm(
-                      "프로젝트를 삭제하시겠습니까? 삭제 후 복구할 수 없습니다."
-                    )
-                  ) {
-                    setProjectActionMessage("");
-                    deleteProjectMutation.mutate();
-                  }
-                }}
-              >
-                프로젝트 삭제
-              </Button>
-            )}
-            {project.canEdit && (
-              <Button
-                bg={"smu.blue"}
-                onClick={() => navigate(`/projects/${project.id}/edit`)}
-              >
-                프로젝트 수정
-              </Button>
+            {(project.canEdit || canDeleteProject) && (
+              <MenuRoot>
+                <MenuTrigger asChild>
+                  <Button variant="outline">프로젝트 관리</Button>
+                </MenuTrigger>
+                <MenuContent>
+                  {project.canEdit && (
+                    <MenuItem
+                      value="edit"
+                      cursor="pointer"
+                      onClick={() => navigate(`/projects/${project.id}/edit`)}
+                    >
+                      프로젝트 수정
+                    </MenuItem>
+                  )}
+                  {project.canEdit && (
+                    <MenuItem
+                      value="finish"
+                      cursor="pointer"
+                      disabled={finishProjectMutation.isPending}
+                      onClick={() => setProjectAction("finish")}
+                    >
+                      프로젝트 완료
+                    </MenuItem>
+                  )}
+                  {canDeleteProject && (
+                    <MenuItem
+                      value="delete"
+                      cursor="pointer"
+                      disabled={deleteProjectMutation.isPending}
+                      onClick={() => setProjectAction("delete")}
+                    >
+                      <Text color="red.600">프로젝트 삭제</Text>
+                    </MenuItem>
+                  )}
+                </MenuContent>
+              </MenuRoot>
             )}
           </HStack>
         </HStack>
@@ -685,19 +830,29 @@ export default function ProjectDetailPage() {
           isPending={removeMemberMutation.isPending}
         />
 
+        <ProjectActionConfirmDialog
+          action={projectAction}
+          setAction={setProjectAction}
+          onConfirm={confirmProjectAction}
+          isPending={
+            applicationMutation.isPending ||
+            cancelApplicationMutation.isPending ||
+            finishProjectMutation.isPending ||
+            deleteProjectMutation.isPending
+          }
+        />
+
         {(applicationMessage || latestApplication?.status === "PENDING") && (
           <Box
             role={
-              applicationMessage &&
-              applicationMutation.data?.status !== "SUCCESS"
+              applicationMessage && applicationMessageFailed
                 ? "alert"
                 : "status"
             }
             p={3}
             borderWidth={1}
             borderColor={
-              applicationMessage &&
-              applicationMutation.data?.status !== "SUCCESS"
+              applicationMessage && applicationMessageFailed
                 ? "smu.orange"
                 : "smu.lightBlue"
             }
@@ -708,11 +863,26 @@ export default function ProjectDetailPage() {
               <Text fontSize={"sm"}>
                 {applicationMessage || "참가 신청 승인 대기 중입니다."}
               </Text>
-              {applicationMessage && (
-                <MessageCloseButton
-                  onClick={() => setApplicationMessage("")}
-                />
-              )}
+              <HStack flexShrink={0}>
+                {latestApplication?.status === "PENDING" && (
+                  <Button
+                    size="sm"
+                    colorPalette="red"
+                    variant="outline"
+                    disabled={cancelApplicationMutation.isPending}
+                    onClick={() => setProjectAction("cancelApplication")}
+                  >
+                    {cancelApplicationMutation.isPending
+                      ? "취소 중..."
+                      : "신청 취소"}
+                  </Button>
+                )}
+                {applicationMessage && (
+                  <MessageCloseButton
+                    onClick={() => setApplicationMessage("")}
+                  />
+                )}
+              </HStack>
             </HStack>
           </Box>
         )}

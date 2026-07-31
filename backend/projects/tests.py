@@ -700,6 +700,103 @@ class ProjectApiTests(TestCase):
             invalid_response.json()["detail"]["message"],
         )
 
+    def test_project_list_separates_finished_and_hides_deleted_projects(self):
+        finished_owned = Project.objects.create(
+            name="Finished Owned Project",
+            description="완료된 팀장 프로젝트",
+            status=Project.Status.FINISHED,
+        )
+        Member.objects.create(
+            project=finished_owned,
+            user=self.user,
+            is_leader=True,
+            status=Member.Status.JOINED,
+        )
+        other_user = get_user_model().objects.create_user(
+            username="finished-leader",
+            github_email="finished-leader@example.com",
+            name="완료 프로젝트 팀장",
+            student_id=300,
+            major="IT공학",
+        )
+        finished_joined = Project.objects.create(
+            name="Finished Joined Project",
+            description="완료된 팀원 프로젝트",
+            status=Project.Status.FINISHED,
+        )
+        Member.objects.create(
+            project=finished_joined,
+            user=other_user,
+            is_leader=True,
+            status=Member.Status.JOINED,
+        )
+        Member.objects.create(
+            project=finished_joined,
+            user=self.user,
+            status=Member.Status.JOINED,
+        )
+        deleted = Project.objects.create(
+            name="Deleted Project",
+            description="삭제된 프로젝트",
+            status=Project.Status.DELETED,
+        )
+        Member.objects.create(
+            project=deleted,
+            user=self.user,
+            is_leader=True,
+            status=Member.Status.JOINED,
+        )
+
+        default_response = self.client.get("/api/v1/projects/")
+        self.client.force_login(self.user)
+        finished_response = self.client.get(
+            "/api/v1/projects/?joined=true&owned=true&status=FINISHED"
+        )
+        finished_owned_response = self.client.get(
+            "/api/v1/projects/?owned=true&status=FINISHED"
+        )
+        finished_joined_response = self.client.get(
+            "/api/v1/projects/?joined=true&status=FINISHED"
+        )
+
+        self.assertEqual(
+            [project["name"] for project in default_response.json()["data"]],
+            ["SOSP"],
+        )
+        self.assertEqual(finished_response.status_code, 200)
+        self.assertEqual(
+            {
+                project["name"]: project["membershipRole"]
+                for project in finished_response.json()["data"]
+            },
+            {
+                "Finished Owned Project": "OWNER",
+                "Finished Joined Project": "MEMBER",
+            },
+        )
+        self.assertEqual(
+            [
+                project["name"]
+                for project in finished_owned_response.json()["data"]
+            ],
+            ["Finished Owned Project"],
+        )
+        self.assertEqual(
+            [
+                project["name"]
+                for project in finished_joined_response.json()["data"]
+            ],
+            ["Finished Joined Project"],
+        )
+
+    def test_finished_project_list_requires_login(self):
+        response = self.client.get(
+            "/api/v1/projects/?joined=true&owned=true&status=FINISHED"
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["status"], "PERMISSION_DENIED")
+
     def test_project_detail_response_shape(self):
         response = self.client.get(f"/api/v1/projects/{self.project.pk}")
 
@@ -717,6 +814,15 @@ class ProjectApiTests(TestCase):
         self.assertNotIn("canApply", body["data"])
         self.assertNotIn("applicationStatus", body["data"])
         self.assertIsNone(body["data"]["members"])
+
+    def test_deleted_project_detail_is_not_available(self):
+        self.project.status = Project.Status.DELETED
+        self.project.save(update_fields=("status", "updated_at"))
+
+        response = self.client.get(f"/api/v1/projects/{self.project.pk}")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["status"], "PROJECT_NOT_FOUND")
 
     def test_project_detail_uses_normalized_repository_data(self):
         RepositorySnapshot.objects.create(
@@ -1713,6 +1819,80 @@ class ProjectApiTests(TestCase):
         )
         self.assertEqual(body["detail"]["httpStatus"], 400)
 
+    def test_project_list_searches_filters_and_sorts_projects(self):
+        alpha = Project.objects.create(
+            name="Alpha Tools",
+            description="Python helper project",
+            status=Project.Status.INACTIVE,
+        )
+        alpha.languages.add(ProjectLanguage.objects.get(name="Go"))
+        finished = Project.objects.create(
+            name="Finished React",
+            description="Completed frontend project",
+            status=Project.Status.FINISHED,
+        )
+        finished.languages.add(ProjectLanguage.objects.get(name="TypeScript"))
+        RepositoryLanguage.objects.create(
+            repository=self.repository,
+            language="TypeScript",
+            bytes=200,
+        )
+        RepositoryLanguage.objects.create(
+            repository=self.repository,
+            language="Python",
+            bytes=100,
+        )
+        RepositoryLanguage.objects.create(
+            repository=self.repository,
+            language="Rust",
+            bytes=50,
+        )
+
+        keyword_response = self.client.get("/api/v1/projects/?keyword=python")
+        stack_response = self.client.get(
+            "/api/v1/projects/?techStack=TypeScript,Go&sort=name"
+        )
+        status_response = self.client.get("/api/v1/projects/?status=finished")
+        combined_response = self.client.get(
+            "/api/v1/projects/?keyword=python&techStack=Go"
+        )
+        repository_language_only_response = self.client.get(
+            "/api/v1/projects/?techStack=Rust"
+        )
+
+        self.assertEqual(
+            [project["id"] for project in keyword_response.json()["data"]],
+            [alpha.pk],
+        )
+        self.assertEqual(
+            [project["id"] for project in stack_response.json()["data"]],
+            [alpha.pk, self.project.pk],
+        )
+        self.assertEqual(
+            stack_response.json()["data"][1]["repository"]["languages"],
+            ["TypeScript", "Python", "Rust"],
+        )
+        self.assertEqual(
+            [project["id"] for project in status_response.json()["data"]],
+            [finished.pk],
+        )
+        self.assertEqual(
+            [project["id"] for project in combined_response.json()["data"]],
+            [alpha.pk],
+        )
+        self.assertEqual(repository_language_only_response.json()["data"], [])
+
+    def test_project_list_rejects_invalid_search_filter(self):
+        for query in ("status=DELETED", "sort=popular", f"keyword={'x' * 101}"):
+            with self.subTest(query=query):
+                response = self.client.get(f"/api/v1/projects/?{query}")
+
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(
+                    response.json()["status"],
+                    "INVALID_PROJECT_FILTER",
+                )
+
     def test_project_membership_history_requires_login(self):
         response = self.client.get("/api/v1/projects/members")
 
@@ -1849,6 +2029,10 @@ class ProjectApiTests(TestCase):
         self.assertEqual(
             response.json()["status"], "MEMBERSHIP_REAPPLICATION_LIMIT"
         )
+        self.assertEqual(
+            response.json()["detail"]["message"],
+            "현재 참가 신청할 수 없습니다.",
+        )
 
     def test_project_membership_application_rejects_invalid_project(self):
         self.client.force_login(self.user)
@@ -1927,6 +2111,18 @@ class ProjectApiTests(TestCase):
         self.assertIn("updatedAt", body["data"][0])
 
     def test_project_membership_history_returns_empty_list(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get("/api/v1/projects/members")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"], [])
+
+    def test_project_membership_history_hides_deleted_projects(self):
+        self.project.status = Project.Status.DELETED
+        self.project.save(update_fields=("status", "updated_at"))
+        self.member.is_leader = False
+        self.member.save(update_fields=("is_leader", "updated_at"))
         self.client.force_login(self.user)
 
         response = self.client.get("/api/v1/projects/members")

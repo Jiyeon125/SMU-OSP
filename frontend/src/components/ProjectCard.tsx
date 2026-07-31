@@ -53,6 +53,9 @@ export default function ProjectCard({ project, showMembershipRole }: Props) {
   const repository = project.repository;
   const repositoryName = repository?.fullName;
   const repositoryUrl = repository?.htmlUrl;
+  const repositoryLanguages =
+    repository?.languages ??
+    (repository?.language ? [repository.language] : []);
 
   return (
     <Box
@@ -67,9 +70,16 @@ export default function ProjectCard({ project, showMembershipRole }: Props) {
     >
       <VStack alignItems={"stretch"} gap={2} flex={1}>
         <HStack justifyContent={"space-between"} alignItems={"flex-start"}>
-          <Text fontWeight={"bold"} color={"smu.blue"} fontSize={"md"}>
-            {project.name}
-          </Text>
+          <RouterLink to={`/projects/${project.id}`}>
+            <Text
+              fontWeight={"bold"}
+              color={"smu.blue"}
+              fontSize={"md"}
+              _hover={{ textDecoration: "underline" }}
+            >
+              {project.name}
+            </Text>
+          </RouterLink>
           <HStack gap={1} flexWrap={"wrap"} justifyContent={"flex-end"}>
             {showMembershipRole && (
               <MembershipRolePill role={project.membershipRole} />
@@ -115,11 +125,11 @@ export default function ProjectCard({ project, showMembershipRole }: Props) {
           {repository ? (
             <VStack alignItems={"stretch"} gap={1} mt={2}>
               <HStack flexWrap={"wrap"} gap={1}>
-                {repository.language && (
-                  <Pill bg={"smu.lightBlue"} color={"white"}>
-                    {repository.language}
+                {repositoryLanguages.map((language) => (
+                  <Pill key={language} bg={"smu.lightBlue"} color={"white"}>
+                    {language}
                   </Pill>
-                )}
+                ))}
                 <Pill>stars {repository.stars}</Pill>
                 <Pill>forks {repository.forks}</Pill>
               </HStack>

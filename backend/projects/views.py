@@ -1,6 +1,9 @@
+from dataclasses import dataclass
+
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Exists, OuterRef, Prefetch
+from django.db.models import Exists, OuterRef, Prefetch, Q
+from django.http import QueryDict
 from rest_framework import status
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.response import Response
@@ -33,6 +36,20 @@ from .services import (
 DEFAULT_PAGE_SIZE = 10
 TRUE_QUERY_VALUES = {"1", "true"}
 FALSE_QUERY_VALUES = {"0", "false"}
+PROJECT_FILTER_STATUSES = {
+    Project.Status.ACTIVE,
+    Project.Status.INACTIVE,
+    Project.Status.FINISHED,
+}
+PROJECT_SORTS = {"latest", "name"}
+
+
+@dataclass(frozen=True)
+class ProjectFilters:
+    keyword: str | None
+    languages: tuple[str, ...]
+    status: str | None
+    sort: str
 
 
 def prepare_projects_for_serialization(projects):
@@ -96,12 +113,55 @@ def parse_boolean_filter(query_params, name):
     )
 
 
+def parse_project_filters(query_params: QueryDict) -> ProjectFilters:
+    keyword = query_params.get("keyword", "").strip() or None
+    languages = [
+        stack.strip()
+        for value in query_params.getlist("techStack")
+        for stack in value.split(",")
+        if stack.strip()
+    ]
+    project_status = (
+        query_params.get("status", "").strip() or None
+    )
+    project_status = project_status.upper() if project_status else None
+    sort = query_params.get("sort", "latest").strip() or "latest"
+
+    if (
+        (keyword and len(keyword) > 100)
+        or len(languages) > 20
+        or any(len(stack) > 50 for stack in languages)
+    ):
+        raise ValueError(
+            "INVALID_PROJECT_FILTER",
+            "프로젝트 검색 조건을 확인해주세요.",
+        )
+    if project_status and project_status not in PROJECT_FILTER_STATUSES:
+        raise ValueError(
+            "INVALID_PROJECT_FILTER",
+            "지원하지 않는 프로젝트 상태입니다.",
+        )
+    if sort not in PROJECT_SORTS:
+        raise ValueError(
+            "INVALID_PROJECT_FILTER",
+            "지원하지 않는 정렬 방식입니다.",
+        )
+
+    return ProjectFilters(
+        keyword=keyword,
+        languages=tuple(languages),
+        status=project_status,
+        sort=sort,
+    )
+
+
 class Projects(APIView):
     def get(self, request):
         try:
             start, limit = parse_pagination(request.query_params)
             joined = parse_boolean_filter(request.query_params, "joined")
             owned = parse_boolean_filter(request.query_params, "owned")
+            filters = parse_project_filters(request.query_params)
         except ValueError as error:
             error_code, message = error.args
             return Response(
@@ -144,13 +204,41 @@ class Projects(APIView):
             .all()
             .order_by("-updated_at", "-pk")
         )
+        projects = projects.exclude(status=Project.Status.DELETED)
 
         if joined or owned:
-            projects = projects.filter(
+            membership_filter = Q(
                 members__user=request.user,
                 members__status=Member.Status.JOINED,
-                members__is_leader=owned,
-            ).distinct()
+            )
+            if joined != owned:
+                membership_filter &= Q(members__is_leader=owned)
+            projects = projects.filter(membership_filter).distinct()
+
+        if not filters.status:
+            projects = projects.exclude(status=Project.Status.FINISHED)
+
+        if filters.keyword:
+            projects = projects.filter(
+                Q(name__icontains=filters.keyword)
+                | Q(description__icontains=filters.keyword)
+            )
+        if filters.languages:
+            project_language_query = Q()
+            for language in filters.languages:
+                project_language_query |= Q(name__iexact=language)
+            project_language_matches = ProjectLanguage.objects.filter(
+                projects=OuterRef("pk")
+            ).filter(project_language_query)
+            projects = projects.annotate(
+                has_matching_filtered_project_language=Exists(
+                    project_language_matches
+                )
+            ).filter(has_matching_filtered_project_language=True)
+        if filters.status:
+            projects = projects.filter(status=filters.status)
+        if filters.sort == "name":
+            projects = projects.order_by("name", "pk")
 
         if request.user.is_authenticated:
             projects = projects.prefetch_related(
@@ -281,6 +369,7 @@ class ProjectDetail(APIView):
                         to_attr="serialized_languages",
                     ),
                 )
+                .exclude(status=Project.Status.DELETED)
                 .get(pk=pk)
             )
         except Project.DoesNotExist:
@@ -512,6 +601,7 @@ class ProjectMemberships(APIView):
         memberships = (
             Member.objects.select_related("project")
             .filter(user=request.user, is_leader=False)
+            .exclude(project__status=Project.Status.DELETED)
             .order_by("-created_at", "-pk")
         )
         serializer = ProjectMembershipHistorySerializer(memberships, many=True)

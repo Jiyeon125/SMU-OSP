@@ -71,11 +71,19 @@ export const getProjects = ({
   limit = null,
   joined = null,
   owned = null,
+  keyword = null,
+  techStack = null,
+  status = null,
+  sort = null,
 }: {
   start?: number | null;
   limit?: number | null;
   joined?: boolean | null;
   owned?: boolean | null;
+  keyword?: string | null;
+  techStack?: string | null;
+  status?: "ACTIVE" | "INACTIVE" | "FINISHED" | null;
+  sort?: "latest" | "name" | null;
 } = {}) =>
   instance
     .get("projects/", {
@@ -84,6 +92,10 @@ export const getProjects = ({
         ...(limit !== null && { limit }),
         ...(joined !== null && { joined }),
         ...(owned !== null && { owned }),
+        ...(keyword && { keyword }),
+        ...(techStack && { techStack }),
+        ...(status && { status }),
+        ...(sort && { sort }),
       },
     })
     .then((response) => response.data);
