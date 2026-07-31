@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Member, Project, Repository
+from .models import Member, Project, ProjectLanguage, Repository
 
 
 class MemberInline(admin.TabularInline):
@@ -49,3 +49,8 @@ class RepositoryAdmin(admin.ModelAdmin):
         "full_name",
     )
     search_fields = ("project__name", "name", "full_name", "html_url")
+
+
+@admin.register(ProjectLanguage)
+class ProjectLanguageAdmin(admin.ModelAdmin):
+    search_fields = ("name",)

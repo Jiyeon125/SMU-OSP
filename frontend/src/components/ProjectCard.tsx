@@ -93,18 +93,6 @@ export default function ProjectCard({ project, showMembershipRole }: Props) {
           )}
         </HStack>
 
-        <HStack flexWrap={"wrap"} gap={1}>
-          {project.usedOpenSource.slice(0, 3).map((r) => (
-            <Pill key={r} bg={"smu.blue"} color={"white"}>
-              {r}
-            </Pill>
-          ))}
-          {project.usedOpenSource.length > 3 && (
-            <Pill bg={"smu.blue"} color={"white"}>
-              +{project.usedOpenSource.length - 3}
-            </Pill>
-          )}
-        </HStack>
 
         <Box
           p={3}

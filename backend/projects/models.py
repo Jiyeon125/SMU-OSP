@@ -84,6 +84,16 @@ class RepositoryStatus(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
 
+class ProjectLanguage(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+
 class Project(CommonModel):
     MAX_REAPPLICATIONS: Final[int] = 5
 
@@ -97,8 +107,11 @@ class Project(CommonModel):
     description = models.TextField()
     demo_url = models.URLField(max_length=500, null=True, blank=True)
     presentation_url = models.URLField(max_length=500, null=True, blank=True)
-    tech_stack = models.JSONField(default=list, blank=True)
-    used_open_source = models.JSONField(default=list, blank=True)
+    languages = models.ManyToManyField(
+        ProjectLanguage,
+        related_name="projects",
+        blank=True,
+    )
     status = models.CharField(
         max_length=30,
         choices=Status.choices,

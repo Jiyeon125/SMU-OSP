@@ -759,19 +759,10 @@ export default function ProjectDetailPage() {
             <Section title="상세 설명">
               <Text whiteSpace={"pre-wrap"}>{project.description || "-"}</Text>
             </Section>
-            <Section title="기술 스택">
+            <Section title="사용 언어">
               <HStack flexWrap={"wrap"} gap={1}>
                 {project.techStack.map((t) => (
                   <Pill key={t}>{t}</Pill>
-                ))}
-              </HStack>
-            </Section>
-            <Section title="사용 오픈소스">
-              <HStack flexWrap={"wrap"} gap={1}>
-                {project.usedOpenSource.map((r) => (
-                  <Pill key={r} bg={"smu.blue"} color={"white"}>
-                    {r}
-                  </Pill>
                 ))}
               </HStack>
             </Section>

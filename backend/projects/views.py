@@ -10,6 +10,7 @@ from common.responses import fail, success
 from .models import (
     Member,
     Project,
+    ProjectLanguage,
     RepositoryLanguage,
     RepositorySnapshot,
 )
@@ -125,6 +126,7 @@ class Projects(APIView):
         projects = (
             Project.objects.select_related("repository", "repository__status")
             .prefetch_related(
+                "languages",
                 Prefetch(
                     "repository__snapshots",
                     queryset=RepositorySnapshot.objects.order_by("-date")[:1],
@@ -198,6 +200,7 @@ class Projects(APIView):
 
         data = serializer.validated_data
         repository_url = data.get("repository_url")
+        languages = data.get("languages", [])
 
         try:
             with transaction.atomic():
@@ -206,9 +209,8 @@ class Projects(APIView):
                     description=data["description"],
                     demo_url=data.get("demo_url"),
                     presentation_url=data.get("presentation_url"),
-                    tech_stack=data.get("tech_stack", []),
-                    used_open_source=data.get("used_open_source", []),
                 )
+                project.languages.set(languages)
                 leader_member = Member.objects.create(
                     project=project,
                     user=request.user,
@@ -259,6 +261,7 @@ class ProjectDetail(APIView):
                     "repository__status",
                 )
                 .prefetch_related(
+                    "languages",
                     Prefetch(
                         "members",
                         queryset=joined_members,
@@ -341,6 +344,7 @@ class ProjectDetail(APIView):
             serializer.is_valid(raise_exception=True)
             data = serializer.validated_data
             repository_url = data.get("repository_url")
+            languages = data["languages"]
             repository_data = prepare_project_repository_update(
                 project,
                 repository_url,
@@ -363,12 +367,11 @@ class ProjectDetail(APIView):
                     "description",
                     "demo_url",
                     "presentation_url",
-                    "tech_stack",
-                    "used_open_source",
                 ):
                     setattr(project, field, data[field])
                 project.set_status(data["status"])
                 project.save()
+                project.languages.set(languages)
                 update_project_repository(
                     project,
                     repository_url,
@@ -484,6 +487,14 @@ class ProjectDetail(APIView):
             )
 
         return Response(success(None), status=status.HTTP_200_OK)
+
+
+class ProjectLanguages(APIView):
+    def get(self, request):
+        return Response(
+            success(list(ProjectLanguage.objects.values_list("name", flat=True))),
+            status=status.HTTP_200_OK,
+        )
 
 
 class ProjectMemberships(APIView):

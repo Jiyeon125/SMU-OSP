@@ -3,7 +3,7 @@ from urllib.parse import urlparse
 
 from rest_framework import serializers
 
-from .models import Member, Project, Repository
+from .models import Member, Project, ProjectLanguage, Repository
 
 ALLOWED_URL_SCHEMES = {"http", "https"}
 HTML_TAG_PATTERN = re.compile(r"</?[a-zA-Z][^>]*>")
@@ -130,24 +130,7 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
         error_messages={"max_length": "URL은 500자 이하로 입력해주세요."},
     )
     techStack = serializers.ListField(
-        source="tech_stack",
-        child=serializers.CharField(
-            allow_blank=True,
-            max_length=MAX_LIST_ITEM_LENGTH,
-            trim_whitespace=True,
-            error_messages={
-                "max_length": "각 항목은 100자 이하로 입력해주세요.",
-            },
-        ),
-        required=False,
-        max_length=MAX_LIST_ITEMS,
-        error_messages={
-            "not_a_list": "목록 형식으로 입력해주세요.",
-            "max_length": "최대 20개까지 입력할 수 있습니다.",
-        },
-    )
-    usedOpenSource = serializers.ListField(
-        source="used_open_source",
+        source="languages",
         child=serializers.CharField(
             allow_blank=True,
             max_length=MAX_LIST_ITEM_LENGTH,
@@ -172,7 +155,6 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
             "demoUrl",
             "presentationUrl",
             "techStack",
-            "usedOpenSource",
         )
 
     def validate(self, attrs):
@@ -210,13 +192,34 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
         for field in ("repository_url", "demo_url", "presentation_url"):
             attrs[field] = self._strip_optional_url(attrs.get(field))
 
-        attrs["tech_stack"] = self._normalize_string_list(
-            attrs.get("tech_stack", [])
-        )
-        attrs["used_open_source"] = self._normalize_string_list(
-            attrs.get("used_open_source", [])
+        attrs["languages"] = self._resolve_languages(
+            self._normalize_string_list(attrs.get("languages", []))
         )
         return attrs
+
+    def _resolve_languages(self, names):
+        unique_names = {}
+        for name in names:
+            unique_names.setdefault(name.casefold(), name)
+        languages = {
+            language.name.casefold(): language
+            for language in ProjectLanguage.objects.all()
+        }
+        missing = [
+            name
+            for key, name in unique_names.items()
+            if key not in languages
+        ]
+        if missing:
+            raise serializers.ValidationError(
+                {
+                    "techStack": (
+                        "등록 가능한 프로그래밍 언어를 선택해주세요: "
+                        + ", ".join(missing)
+                    )
+                }
+            )
+        return [languages[key] for key in unique_names]
 
     def _strip_required(self, value, message):
         value = (value or "").strip()
@@ -292,10 +295,11 @@ class ProjectSerializer(serializers.ModelSerializer):
         source="presentation_url",
         allow_null=True,
     )
-    techStack = serializers.ListField(source="tech_stack", child=serializers.CharField())
-    usedOpenSource = serializers.ListField(
-        source="used_open_source",
-        child=serializers.CharField(),
+    techStack = serializers.SlugRelatedField(
+        source="languages",
+        many=True,
+        read_only=True,
+        slug_field="name",
     )
     maxMembers = serializers.IntegerField(source="max_members")
     repository = RepositorySerializer(read_only=True, allow_null=True)
@@ -320,7 +324,6 @@ class ProjectSerializer(serializers.ModelSerializer):
             "demoUrl",
             "presentationUrl",
             "techStack",
-            "usedOpenSource",
             "status",
             "maxMembers",
             "repository",

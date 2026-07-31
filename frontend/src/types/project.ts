@@ -44,7 +44,6 @@ export interface Project {
   demoUrl?: string | null;
   presentationUrl?: string | null;
   techStack: string[];
-  usedOpenSource: string[];
   status: ProjectStatus;
   maxMembers: number;
   repository?: Repository | null;
@@ -80,7 +79,6 @@ export interface ProjectInput {
   demoUrl?: string | null;
   presentationUrl?: string | null;
   techStack: string[];
-  usedOpenSource: string[];
 }
 
 export interface ProjectCreateDetail {

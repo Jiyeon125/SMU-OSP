@@ -12,6 +12,7 @@ from django.utils import timezone
 from .models import (
     Member,
     Project,
+    ProjectLanguage,
     Repository,
     RepositoryLanguage,
     RepositorySnapshot,
@@ -582,9 +583,10 @@ class ProjectApiTests(TestCase):
             name="SOSP",
             description="SMU Open-Source Platform",
             demo_url="https://sosp.sookmyung.ac.kr",
-            tech_stack=["React", "Django"],
-            used_open_source=["Django REST framework"],
             status=Project.Status.ACTIVE,
+        )
+        self.project.languages.set(
+            ProjectLanguage.objects.filter(name__in=("Python", "TypeScript"))
         )
         self.repository = Repository.objects.create(
             project=self.project,
@@ -658,6 +660,45 @@ class ProjectApiTests(TestCase):
         self.assertEqual(body["data"][0]["repository"]["fullName"], "Jiyeon125/SMU-OSP")
         self.assertEqual(body["detail"]["pagination"]["count"], 1)
         self.assertEqual(body["detail"]["pagination"]["currentPage"], 1)
+
+    def test_project_language_list_uses_programming_languages(self):
+        response = self.client.get("/api/v1/projects/languages")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Python", response.json()["data"])
+        self.assertIn("TypeScript", response.json()["data"])
+        self.assertNotIn("React", response.json()["data"])
+        self.assertNotIn("Django", response.json()["data"])
+
+    def test_project_create_normalizes_and_rejects_language_names(self):
+        self.client.force_login(self.user)
+        payload = {
+            "name": "Language Project",
+            "description": "사용 언어 검증",
+            "techStack": ["python", "PYTHON", "TypeScript"],
+        }
+
+        response = self.client.post(
+            "/api/v1/projects/",
+            data=payload,
+            content_type="application/json",
+        )
+        invalid_response = self.client.post(
+            "/api/v1/projects/",
+            data={**payload, "name": "Framework Project", "techStack": ["React"]},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            response.json()["data"]["techStack"],
+            ["Python", "TypeScript"],
+        )
+        self.assertEqual(invalid_response.status_code, 400)
+        self.assertIn(
+            "등록 가능한 프로그래밍 언어",
+            invalid_response.json()["detail"]["message"],
+        )
 
     def test_project_detail_response_shape(self):
         response = self.client.get(f"/api/v1/projects/{self.project.pk}")
@@ -781,8 +822,7 @@ class ProjectApiTests(TestCase):
                 description="수정된 프로젝트 설명",
                 demoUrl="https://updated.example.com",
                 presentationUrl="https://updated.example.com/slides",
-                techStack=["React", "Django", "MySQL"],
-                usedOpenSource=["Django REST framework", "Chakra UI"],
+                techStack=["TypeScript", "Python", "Go"],
                 status=Project.Status.FINISHED,
             ),
             content_type="application/json",
@@ -803,12 +843,10 @@ class ProjectApiTests(TestCase):
             self.project.presentation_url,
             "https://updated.example.com/slides",
         )
-        self.assertEqual(self.project.tech_stack, ["React", "Django", "MySQL"])
         self.assertEqual(
-            self.project.used_open_source,
-            ["Django REST framework", "Chakra UI"],
+            list(self.project.languages.values_list("name", flat=True)),
+            ["Go", "Python", "TypeScript"],
         )
-
         self.repository.refresh_from_db()
         self.assertEqual(
             self.repository.html_url,
@@ -1085,8 +1123,7 @@ class ProjectApiTests(TestCase):
                     "repositoryUrl": "https://github.com/example/new-project",
                     "demoUrl": "",
                     "presentationUrl": "",
-                    "techStack": ["React", "Django"],
-                    "usedOpenSource": ["Django REST framework"],
+                    "techStack": ["TypeScript", "Python"],
                 },
                 content_type="application/json",
             )
@@ -1589,8 +1626,9 @@ class ProjectApiTests(TestCase):
             "repositoryUrl": self.repository.html_url,
             "demoUrl": self.project.demo_url,
             "presentationUrl": self.project.presentation_url,
-            "techStack": self.project.tech_stack,
-            "usedOpenSource": self.project.used_open_source,
+            "techStack": list(
+                self.project.languages.values_list("name", flat=True)
+            ),
             "status": self.project.status,
         }
         payload.update(overrides)
@@ -2296,15 +2334,15 @@ class ProjectApiTests(TestCase):
         self.project.delete()
         base = timezone.now()
         created_projects = []
+        language = ProjectLanguage.objects.get(name="TypeScript")
 
         for index in range(1, total + 1):
             project = Project.objects.create(
                 name=f"Project {index}",
                 description=f"Project {index} description",
-                tech_stack=["React"],
-                used_open_source=["Django REST framework"],
                 status=Project.Status.ACTIVE,
             )
+            project.languages.add(language)
             created_projects.append(project)
 
         for index, project in enumerate(created_projects, start=1):
