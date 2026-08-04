@@ -1706,11 +1706,35 @@ class ProjectApiTests(TestCase):
         self.assertFalse(body["detail"]["pagination"]["hasNext"])
         self.assertTrue(body["detail"]["pagination"]["hasPrevious"])
 
+    def test_project_list_accepts_maximum_page_size(self):
+        response = self.client.get("/api/v1/projects/?start=0&limit=100")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["detail"]["pagination"]["limit"], 100)
+
+    def test_project_list_blank_pagination_uses_defaults(self):
+        response = self.client.get("/api/v1/projects/?start=&limit=")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["detail"]["pagination"],
+            {
+                "start": 0,
+                "limit": 12,
+                "count": 1,
+                "currentPage": 1,
+                "totalPages": 1,
+                "hasPrevious": False,
+                "hasNext": False,
+            },
+        )
+
     def test_project_list_invalid_pagination_parameter(self):
         invalid_queries = (
             "start=-1&limit=10",
             "start=abc&limit=10",
             "start=0&limit=0",
+            "start=0&limit=101",
         )
         for query in invalid_queries:
             with self.subTest(query=query):
@@ -1721,7 +1745,7 @@ class ProjectApiTests(TestCase):
                 self.assertEqual(body["status"], "INVALID_PAGINATION_PARAMETER")
                 self.assertEqual(
                     body["detail"]["message"],
-                    "start는 0 이상, limit은 1 이상이어야 합니다.",
+                    "start는 0 이상, limit은 1 이상 100 이하여야 합니다.",
                 )
                 self.assertEqual(body["detail"]["httpStatus"], 400)
 
@@ -1808,16 +1832,31 @@ class ProjectApiTests(TestCase):
         self.assertEqual(body["detail"]["pagination"]["count"], 1)
 
     def test_project_list_rejects_invalid_boolean_filter(self):
-        response = self.client.get("/api/v1/projects/?joined=yes")
+        for field in ("joined", "owned"):
+            with self.subTest(field=field):
+                response = self.client.get(
+                    f"/api/v1/projects/?{field}=yes"
+                )
 
-        self.assertEqual(response.status_code, 400)
-        body = response.json()
-        self.assertEqual(body["status"], "INVALID_PROJECT_FILTER")
-        self.assertEqual(
-            body["detail"]["message"],
-            "joined는 true 또는 false여야 합니다.",
-        )
-        self.assertEqual(body["detail"]["httpStatus"], 400)
+                self.assertEqual(response.status_code, 400)
+                body = response.json()
+                self.assertEqual(body["status"], "INVALID_PROJECT_FILTER")
+                self.assertEqual(
+                    body["detail"]["message"],
+                    f"{field}는 true 또는 false여야 합니다.",
+                )
+                self.assertEqual(body["detail"]["httpStatus"], 400)
+
+    def test_project_list_accepts_numeric_boolean_filter(self):
+        self.client.force_login(self.user)
+
+        for value in ("0", "1"):
+            with self.subTest(value=value):
+                response = self.client.get(
+                    f"/api/v1/projects/?owned={value}"
+                )
+
+                self.assertEqual(response.status_code, 200)
 
     def test_project_list_searches_filters_and_sorts_projects(self):
         alpha = Project.objects.create(
@@ -1883,7 +1922,12 @@ class ProjectApiTests(TestCase):
         self.assertEqual(repository_language_only_response.json()["data"], [])
 
     def test_project_list_rejects_invalid_search_filter(self):
-        for query in ("status=DELETED", "sort=popular", f"keyword={'x' * 101}"):
+        for query in (
+            "status=DELETED",
+            "sort=popular",
+            f"keyword={'x' * 101}",
+            f"techStack={'x' * 51}",
+        ):
             with self.subTest(query=query):
                 response = self.client.get(f"/api/v1/projects/?{query}")
 
@@ -2346,6 +2390,20 @@ class ProjectApiTests(TestCase):
         self.assertIsNone(managed_members[pending.pk]["description"])
         self.assertIn("createdAt", managed_members[pending.pk])
         self.assertIsNone(managed_members[pending.pk]["joinedAt"])
+
+    def test_project_members_reject_invalid_manage_filter(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            f"/api/v1/projects/{self.project.pk}/members?manage=yes"
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["status"], "INVALID_MEMBER_FILTER")
+        self.assertEqual(
+            response.json()["detail"]["message"],
+            "manage는 true 또는 false여야 합니다.",
+        )
 
     def test_non_member_cannot_list_project_members(self):
         outsider = get_user_model().objects.create_user(
