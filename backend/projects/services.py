@@ -1,6 +1,8 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from django.contrib.auth.models import AnonymousUser
+from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, transaction
 
 from users.models import User
@@ -240,3 +242,129 @@ def create_project(
         leader_member=leader_member,
         repository_error=repository_error,
     )
+
+
+def _ensure_project_leader(
+    project: Project,
+    actor: User | AnonymousUser,
+) -> None:
+    if not actor.is_authenticated or not Member.objects.filter(
+        project=project,
+        user=actor,
+        status=Member.Status.JOINED,
+        is_leader=True,
+    ).exists():
+        raise PermissionDenied
+
+
+def get_project_update_target(
+    *,
+    actor: User | AnonymousUser,
+    project_id: int,
+) -> Project:
+    """프로젝트 수정 입력 검증에 사용할 권한 확인된 대상을 반환한다.
+
+    Args:
+        actor: 프로젝트 수정을 요청한 사용자.
+        project_id: 수정할 프로젝트 ID.
+
+    Returns:
+        Repository 관계가 조회된 프로젝트.
+
+    Raises:
+        Project.DoesNotExist: 프로젝트가 존재하지 않는 경우.
+        PermissionDenied: 요청자가 프로젝트 팀장이 아닌 경우.
+    """
+    project = Project.objects.select_related("repository").get(pk=project_id)
+    _ensure_project_leader(project, actor)
+    return project
+
+
+def update_project(
+    *,
+    actor: User | AnonymousUser,
+    project_id: int,
+    name: str,
+    description: str,
+    repository_url: str | None,
+    demo_url: str | None,
+    presentation_url: str | None,
+    languages: Sequence[ProjectLanguage],
+    status: str,
+) -> None:
+    """프로젝트와 연결 정보를 잠금 상태에서 수정한다.
+
+    Repository 사전 조회는 DB 트랜잭션 밖에서 수행한다. 잠금 이후 팀장
+    권한을 다시 확인하고 Project, 언어, Repository 순서로 갱신한다.
+
+    Args:
+        actor: 프로젝트 수정을 요청한 사용자.
+        project_id: 수정할 프로젝트 ID.
+        name: 프로젝트명.
+        description: 프로젝트 설명.
+        repository_url: 연결할 Repository URL.
+        demo_url: 결과물 URL.
+        presentation_url: 발표 자료 URL.
+        languages: 변경할 프로젝트 사용 언어.
+        status: 변경할 프로젝트 상태.
+
+    Raises:
+        Project.DoesNotExist: 프로젝트가 존재하지 않는 경우.
+        PermissionDenied: 요청자가 프로젝트 팀장이 아닌 경우.
+        RepositoryRegistrationError: Repository 등록에 실패한 경우.
+        ValueError: 상태 전이 또는 Repository 변경이 허용되지 않는 경우.
+    """
+    project = get_project_update_target(
+        actor=actor,
+        project_id=project_id,
+    )
+    repository_data = prepare_project_repository_update(
+        project,
+        repository_url,
+    )
+
+    with transaction.atomic():
+        project = (
+            Project.objects.select_for_update()
+            .select_related("repository")
+            .get(pk=project_id)
+        )
+        _ensure_project_leader(project, actor)
+
+        previous_project_status = project.status
+        project.name = name
+        project.description = description
+        project.demo_url = demo_url
+        project.presentation_url = presentation_url
+        project.set_status(status)
+        project.save()
+        project.languages.set(languages)
+        update_project_repository(
+            project,
+            repository_url,
+            previous_project_status=previous_project_status,
+            repository_data=repository_data,
+        )
+
+
+def mark_project_deleted(
+    *,
+    actor: User | AnonymousUser,
+    project_id: int,
+) -> None:
+    """프로젝트를 잠근 뒤 삭제 상태로 전환한다.
+
+    Args:
+        actor: 프로젝트 삭제를 요청한 사용자.
+        project_id: 삭제 상태로 전환할 프로젝트 ID.
+
+    Raises:
+        Project.DoesNotExist: 프로젝트가 존재하지 않는 경우.
+        PermissionDenied: 요청자가 프로젝트 팀장이 아닌 경우.
+        ValueError: 현재 상태에서 삭제 상태로 전환할 수 없는 경우.
+    """
+    with transaction.atomic():
+        project = Project.objects.select_for_update().get(pk=project_id)
+        _ensure_project_leader(project, actor)
+        project.set_status(Project.Status.DELETED)
+        project.save(update_fields=("status", "updated_at"))

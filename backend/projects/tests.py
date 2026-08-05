@@ -1041,6 +1041,29 @@ class ProjectApiTests(TestCase):
         self.project.refresh_from_db()
         self.assertEqual(self.project.name, "SOSP")
 
+    def test_anonymous_user_cannot_update_or_delete_project(self):
+        update_response = self.client.put(
+            f"/api/v1/projects/{self.project.pk}",
+            data=self.project_update_payload(),
+            content_type="application/json",
+        )
+        delete_response = self.client.delete(
+            f"/api/v1/projects/{self.project.pk}"
+        )
+
+        self.assertEqual(update_response.status_code, 403)
+        self.assertEqual(
+            update_response.json()["status"],
+            "PERMISSION_DENIED",
+        )
+        self.assertEqual(delete_response.status_code, 403)
+        self.assertEqual(
+            delete_response.json()["status"],
+            "PERMISSION_DENIED",
+        )
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.status, Project.Status.ACTIVE)
+
     def test_project_completion_cancels_pending_memberships(self):
         pending = Member.objects.create(
             project=self.project,
