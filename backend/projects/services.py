@@ -346,3 +346,85 @@ def mark_project_deleted(
         _ensure_project_leader(project, actor)
         project.set_status(Project.Status.DELETED)
         project.save(update_fields=("status", "updated_at"))
+
+
+def create_membership_application(
+    *,
+    actor: User,
+    project_id: int,
+) -> None:
+    """프로젝트 참가 신청을 PENDING 멤버십으로 생성한다.
+
+    과거 신청 이력 전체를 Project의 신청 가능 여부 검증에 사용한다.
+
+    Args:
+        actor: 참가 신청 사용자.
+        project_id: 신청할 프로젝트 ID.
+
+    Raises:
+        Project.DoesNotExist: 프로젝트가 존재하지 않는 경우.
+        ValidationError: 프로젝트에 참가 신청할 수 없는 경우.
+    """
+    project = Project.objects.get(pk=project_id)
+    memberships = list(
+        Member.objects.filter(
+            project=project,
+            user=actor,
+        ).order_by("-created_at", "-pk")
+    )
+    project.validate_membership_application(memberships)
+    Member.objects.create(
+        project=project,
+        user=actor,
+        status=Member.Status.PENDING,
+    )
+
+
+def cancel_or_leave_membership(
+    *,
+    actor: User,
+    project_id: int,
+    description: str | None,
+    update_description: bool,
+) -> None:
+    """최신 참가 신청을 취소하거나 일반 팀원이 프로젝트에서 탈퇴한다.
+
+    팀장 멤버십을 우선 조회해 이후에 생성된 신청 이력이 있더라도 팀장
+    보호 규칙을 우회하지 못하게 한다.
+
+    Args:
+        actor: 신청 취소 또는 탈퇴 사용자.
+        project_id: 대상 프로젝트 ID.
+        description: 저장할 취소 또는 탈퇴 사유.
+        update_description: description 입력 여부.
+
+    Raises:
+        Project.DoesNotExist: 프로젝트가 존재하지 않는 경우.
+        Member.DoesNotExist: 사용자의 멤버십 이력이 없는 경우.
+        ValidationError: 현재 멤버십 상태에서 전이할 수 없는 경우.
+    """
+    if not Project.objects.filter(pk=project_id).exists():
+        raise Project.DoesNotExist
+
+    with transaction.atomic():
+        membership = (
+            Member.objects.select_for_update()
+            .filter(project_id=project_id, user=actor)
+            .order_by("-is_leader", "-created_at", "-pk")
+            .first()
+        )
+        if membership is None:
+            raise Member.DoesNotExist
+
+        membership.transition_to(
+            description=description,
+            update_description=update_description,
+        )
+        membership.save(
+            update_fields=(
+                "status",
+                "description",
+                "joined_at",
+                "updated_at",
+            )
+        )

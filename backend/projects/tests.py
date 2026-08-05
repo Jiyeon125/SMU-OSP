@@ -2347,6 +2347,14 @@ class ProjectApiTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["status"], "PERMISSION_DENIED")
 
+    def test_project_membership_cancel_rejects_invalid_project(self):
+        self.client.force_login(self.user)
+
+        response = self.client.delete("/api/v1/projects/999999/members")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["status"], "PROJECT_NOT_FOUND")
+
     def test_project_membership_cancel_rejects_user_without_membership(self):
         other_user = get_user_model().objects.create_user(
             username="non-member",

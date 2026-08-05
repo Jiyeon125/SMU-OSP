@@ -27,6 +27,8 @@ from .serializers import (
 )
 from .services import (
     RepositoryRegistrationError,
+    cancel_or_leave_membership,
+    create_membership_application,
     create_project,
     get_project_update_target,
     mark_project_deleted,
@@ -424,7 +426,10 @@ class ProjectMembers(APIView):
             )
 
         try:
-            project = Project.objects.get(pk=pk)
+            create_membership_application(
+                actor=request.user,
+                project_id=pk,
+            )
         except Project.DoesNotExist:
             return Response(
                 fail(
@@ -434,15 +439,6 @@ class ProjectMembers(APIView):
                 ),
                 status=status.HTTP_404_NOT_FOUND,
             )
-
-        memberships = list(
-            Member.objects.filter(
-                project=project,
-                user=request.user,
-            ).order_by("-created_at", "-pk")
-        )
-        try:
-            project.validate_membership_application(memberships)
         except ValidationError as error:
             return Response(
                 fail(
@@ -453,11 +449,6 @@ class ProjectMembers(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        Member.objects.create(
-            project=project,
-            user=request.user,
-            status=Member.Status.PENDING,
-        )
         return Response(
             success(None),
             status=status.HTTP_201_CREATED,
@@ -474,16 +465,6 @@ class ProjectMembers(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        if not Project.objects.filter(pk=pk).exists():
-            return Response(
-                fail(
-                    "PROJECT_NOT_FOUND",
-                    f"id={pk}에 해당하는 프로젝트를 찾을 수 없습니다.",
-                    status.HTTP_404_NOT_FOUND,
-                ),
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
         serializer = ProjectMemberDescriptionSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(
@@ -495,49 +476,48 @@ class ProjectMembers(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        with transaction.atomic():
-            membership = (
-                Member.objects.select_for_update()
-                .filter(project_id=pk, user=request.user)
-                .order_by("-is_leader", "-created_at", "-pk")
-                .first()
+        try:
+            cancel_or_leave_membership(
+                actor=request.user,
+                project_id=pk,
+                description=serializer.validated_data.get("description"),
+                update_description="description" in serializer.validated_data,
             )
-
-            if membership is None:
-                return Response(
-                    fail(
-                        "MEMBERSHIP_NOT_FOUND",
-                        "해당 프로젝트의 참여 또는 신청 내역을 찾을 수 없습니다.",
-                        status.HTTP_404_NOT_FOUND,
-                    ),
-                    status=status.HTTP_404_NOT_FOUND,
-                )
-
-            try:
-                membership.transition_to(
-                    description=serializer.validated_data.get("description"),
-                    update_description="description" in serializer.validated_data,
-                )
-            except ValidationError as error:
-                response_status = (
-                    "PERMISSION_DENIED"
-                    if error.code == "leader_protected"
-                    else "INVALID_MEMBER_STATUS"
-                )
-                return Response(
-                    fail(
-                        response_status,
-                        error.message,
-                        status.HTTP_403_FORBIDDEN
-                        if response_status == "PERMISSION_DENIED"
-                        else status.HTTP_400_BAD_REQUEST,
-                    ),
-                    status=status.HTTP_403_FORBIDDEN
+        except Project.DoesNotExist:
+            return Response(
+                fail(
+                    "PROJECT_NOT_FOUND",
+                    f"id={pk}에 해당하는 프로젝트를 찾을 수 없습니다.",
+                    status.HTTP_404_NOT_FOUND,
+                ),
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except Member.DoesNotExist:
+            return Response(
+                fail(
+                    "MEMBERSHIP_NOT_FOUND",
+                    "해당 프로젝트의 참여 또는 신청 내역을 찾을 수 없습니다.",
+                    status.HTTP_404_NOT_FOUND,
+                ),
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except ValidationError as error:
+            response_status = (
+                "PERMISSION_DENIED"
+                if error.code == "leader_protected"
+                else "INVALID_MEMBER_STATUS"
+            )
+            return Response(
+                fail(
+                    response_status,
+                    error.message,
+                    status.HTTP_403_FORBIDDEN
                     if response_status == "PERMISSION_DENIED"
                     else status.HTTP_400_BAD_REQUEST,
-                )
-            membership.save(
-                update_fields=("status", "description", "joined_at", "updated_at")
+                ),
+                status=status.HTTP_403_FORBIDDEN
+                if response_status == "PERMISSION_DENIED"
+                else status.HTTP_400_BAD_REQUEST,
             )
 
         return Response(success(None), status=status.HTTP_200_OK)
