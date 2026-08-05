@@ -2855,6 +2855,18 @@ class ProjectApiTests(TestCase):
         self.assertEqual(leader.status_code, 404)
         self.assertEqual(leader.json()["status"], "MEMBER_NOT_FOUND")
 
+    def test_project_member_update_rejects_invalid_project(self):
+        self.client.force_login(self.user)
+
+        response = self.client.put(
+            f"/api/v1/projects/999999/members/{self.member.pk}",
+            data={"status": Member.Status.JOINED},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["status"], "PROJECT_NOT_FOUND")
+
     def create_projects_for_pagination(self, total):
         self.project.delete()
         base = timezone.now()
