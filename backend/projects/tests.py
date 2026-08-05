@@ -2350,7 +2350,11 @@ class ProjectApiTests(TestCase):
     def test_project_membership_cancel_rejects_invalid_project(self):
         self.client.force_login(self.user)
 
-        response = self.client.delete("/api/v1/projects/999999/members")
+        response = self.client.delete(
+            "/api/v1/projects/999999/members",
+            data={"description": "x" * 256},
+            content_type="application/json",
+        )
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["status"], "PROJECT_NOT_FOUND")

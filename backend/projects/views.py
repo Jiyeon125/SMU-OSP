@@ -40,6 +40,7 @@ from .selectors import (
     list_memberships_for_user,
     list_project_members,
     list_projects,
+    project_exists,
 )
 
 
@@ -465,6 +466,16 @@ class ProjectMembers(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        if not project_exists(pk):
+            return Response(
+                fail(
+                    "PROJECT_NOT_FOUND",
+                    f"id={pk}에 해당하는 프로젝트를 찾을 수 없습니다.",
+                    status.HTTP_404_NOT_FOUND,
+                ),
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
         serializer = ProjectMemberDescriptionSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(
@@ -482,15 +493,6 @@ class ProjectMembers(APIView):
                 project_id=pk,
                 description=serializer.validated_data.get("description"),
                 update_description="description" in serializer.validated_data,
-            )
-        except Project.DoesNotExist:
-            return Response(
-                fail(
-                    "PROJECT_NOT_FOUND",
-                    f"id={pk}에 해당하는 프로젝트를 찾을 수 없습니다.",
-                    status.HTTP_404_NOT_FOUND,
-                ),
-                status=status.HTTP_404_NOT_FOUND,
             )
         except Member.DoesNotExist:
             return Response(

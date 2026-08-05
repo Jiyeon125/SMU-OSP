@@ -164,6 +164,10 @@ def get_project_detail(project_id: int) -> Project:
     return project
 
 
+def project_exists(project_id: int) -> bool:
+    return Project.objects.filter(pk=project_id).exists()
+
+
 def list_memberships_for_user(user_id: int) -> list[Member]:
     """사용자의 팀장 이외 멤버십 이력을 최신순으로 반환한다.
 
