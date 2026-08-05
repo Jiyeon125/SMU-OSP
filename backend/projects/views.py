@@ -26,7 +26,9 @@ from .serializers import (
     ProjectUpdateSerializer,
 )
 from .services import (
+    ProjectCreationError,
     RepositoryRegistrationError,
+    create_project,
     prepare_project_repository_update,
     update_project_repository,
 )
@@ -137,43 +139,44 @@ class Projects(APIView):
             )
 
         data = serializer.validated_data
-        repository_url = data.get("repository_url")
-        languages = data.get("languages", [])
-
         try:
-            with transaction.atomic():
-                project = Project.objects.create(
-                    name=data["name"],
-                    description=data["description"],
-                    demo_url=data.get("demo_url"),
-                    presentation_url=data.get("presentation_url"),
-                )
-                project.languages.set(languages)
-                leader_member = Member.objects.create(
-                    project=project,
-                    user=request.user,
-                    is_leader=True,
-                    status=Member.Status.JOINED,
-                )
-                project.request_user_memberships = [leader_member]
+            result = create_project(
+                actor=request.user,
+                name=data["name"],
+                description=data["description"],
+                repository_url=data.get("repository_url"),
+                demo_url=data.get("demo_url"),
+                presentation_url=data.get("presentation_url"),
+                languages=data.get("languages", []),
+            )
+        except ProjectCreationError as error:
+            return Response(
+                fail(
+                    "INVALID_PROJECT_INPUT",
+                    str(error),
+                    status.HTTP_400_BAD_REQUEST,
+                ),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         except IntegrityError:
             return Response(
                 fail(
                     "INVALID_PROJECT_INPUT",
-                    "이미 등록된 프로젝트명입니다.",
+                    "프로젝트를 생성하지 못했습니다.",
                     status.HTTP_400_BAD_REQUEST,
                 ),
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        project = result.project
+        project.request_user_memberships = [result.leader_member]
         detail = None
-        try:
-            update_project_repository(project, repository_url)
-        except ValueError as error:
+        if result.repository_error is not None:
+            error = result.repository_error
             detail = {
                 "repositoryRegistration": {
                     "status": "FAILED",
-                    "code": getattr(error, "code", "INVALID_PROJECT_INPUT"),
+                    "code": error.code,
                     "message": str(error),
                 }
             }
