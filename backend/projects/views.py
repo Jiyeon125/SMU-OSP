@@ -28,8 +28,9 @@ from .serializers import (
 from .services import (
     RepositoryRegistrationError,
     create_project,
-    prepare_project_repository_update,
-    update_project_repository,
+    get_project_update_target,
+    mark_project_deleted,
+    update_project,
 )
 from .selectors import (
     get_joined_project_member,
@@ -218,62 +219,28 @@ class ProjectDetail(APIView):
         return Response(success(serializer.data), status=status.HTTP_200_OK)
 
     def put(self, request, pk):
-        leader_members = Member.objects.filter(
-            project=OuterRef("pk"),
-            user_id=request.user.pk if request.user.is_authenticated else -1,
-            status=Member.Status.JOINED,
-            is_leader=True,
-        )
         try:
-            project = (
-                Project.objects.select_related("repository")
-                .annotate(is_leader=Exists(leader_members))
-                .get(pk=pk)
+            project = get_project_update_target(
+                actor=request.user,
+                project_id=pk,
             )
-            if not project.is_leader:
-                raise PermissionDenied
-
             serializer = ProjectUpdateSerializer(
                 project,
                 data=request.data,
             )
             serializer.is_valid(raise_exception=True)
             data = serializer.validated_data
-            repository_url = data.get("repository_url")
-            languages = data["languages"]
-            repository_data = prepare_project_repository_update(
-                project,
-                repository_url,
+            update_project(
+                actor=request.user,
+                project_id=pk,
+                name=data["name"],
+                description=data["description"],
+                repository_url=data.get("repository_url"),
+                demo_url=data.get("demo_url"),
+                presentation_url=data.get("presentation_url"),
+                languages=data["languages"],
+                status=data["status"],
             )
-
-            with transaction.atomic():
-                project = (
-                    Project.objects.select_for_update()
-                    .select_related("repository")
-                    .annotate(is_leader=Exists(leader_members))
-                    .get(pk=pk)
-                )
-
-                if not project.is_leader:
-                    raise PermissionDenied
-
-                previous_project_status = project.status
-                for field in (
-                    "name",
-                    "description",
-                    "demo_url",
-                    "presentation_url",
-                ):
-                    setattr(project, field, data[field])
-                project.set_status(data["status"])
-                project.save()
-                project.languages.set(languages)
-                update_project_repository(
-                    project,
-                    repository_url,
-                    previous_project_status=previous_project_status,
-                    repository_data=repository_data,
-                )
         except Project.DoesNotExist:
             return Response(
                 fail(
@@ -335,25 +302,11 @@ class ProjectDetail(APIView):
         )
 
     def delete(self, request, pk):
-        leader_members = Member.objects.filter(
-            project=OuterRef("pk"),
-            user_id=request.user.pk if request.user.is_authenticated else -1,
-            status=Member.Status.JOINED,
-            is_leader=True,
-        )
         try:
-            with transaction.atomic():
-                project = (
-                    Project.objects.select_for_update()
-                    .annotate(is_leader=Exists(leader_members))
-                    .get(pk=pk)
-                )
-
-                if not project.is_leader:
-                    raise PermissionDenied
-
-                project.set_status(Project.Status.DELETED)
-                project.save(update_fields=("status", "updated_at"))
+            mark_project_deleted(
+                actor=request.user,
+                project_id=pk,
+            )
         except Project.DoesNotExist:
             return Response(
                 fail(
