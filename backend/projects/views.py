@@ -1,8 +1,7 @@
 from dataclasses import asdict
 
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import IntegrityError, transaction
-from django.db.models import Exists, OuterRef
+from django.db import IntegrityError
 from rest_framework import status
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.response import Response
@@ -28,6 +27,7 @@ from .serializers import (
 from .services import (
     RepositoryRegistrationError,
     cancel_or_leave_membership,
+    change_project_member_status,
     create_membership_application,
     create_project,
     get_project_update_target,
@@ -537,13 +537,6 @@ class ProjectMemberDetail(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        leader_members = Member.objects.filter(
-            project=OuterRef("pk"),
-            user=request.user,
-            is_leader=True,
-            status=Member.Status.JOINED,
-        )
-
         serializer = ProjectMemberUpdateSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(
@@ -555,35 +548,15 @@ class ProjectMemberDetail(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        next_status = serializer.validated_data["status"]
         try:
-            with transaction.atomic():
-                project = (
-                    Project.objects.select_for_update()
-                    .annotate(is_leader=Exists(leader_members))
-                    .get(pk=pk)
-                )
-                if not project.is_leader:
-                    raise ValidationError(
-                        "프로젝트 리더만 멤버 상태를 변경할 수 있습니다.",
-                        code="leader_required",
-                    )
-
-                member = (
-                    Member.objects.select_for_update()
-                    .select_related("user")
-                    .get(project_id=pk, pk=member_id, is_leader=False)
-                )
-                member.project = project
-                member.transition_to(
-                    next_status,
-                    description=serializer.validated_data.get("description"),
-                    update_description="description" in serializer.validated_data,
-                    require_description=next_status == Member.Status.LEFT,
-                )
-                member.save(
-                    update_fields=("status", "description", "joined_at", "updated_at")
-                )
+            change_project_member_status(
+                actor=request.user,
+                project_id=pk,
+                member_id=member_id,
+                next_status=serializer.validated_data["status"],
+                description=serializer.validated_data.get("description"),
+                update_description="description" in serializer.validated_data,
+            )
         except Project.DoesNotExist:
             return Response(
                 fail(

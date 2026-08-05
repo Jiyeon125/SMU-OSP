@@ -2,8 +2,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from django.contrib.auth.models import AnonymousUser
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
+from django.db.models import Exists, OuterRef
 
 from users.models import User
 
@@ -408,6 +409,74 @@ def cancel_or_leave_membership(
             update_description=update_description,
         )
         membership.save(
+            update_fields=(
+                "status",
+                "description",
+                "joined_at",
+                "updated_at",
+            )
+        )
+
+
+def change_project_member_status(
+    *,
+    actor: User,
+    project_id: int,
+    member_id: int,
+    next_status: str,
+    description: str | None,
+    update_description: bool,
+) -> None:
+    """팀장이 프로젝트 멤버의 상태를 변경한다.
+
+    Project를 먼저 잠근 뒤 대상 Member를 잠가 승인 시 정원 검사와 상태
+    변경이 같은 트랜잭션에서 수행되도록 한다. Member에는 잠긴 Project
+    인스턴스를 연결해 정원 검사 중 관계를 다시 조회하지 않는다.
+
+    Args:
+        actor: 멤버 상태 변경을 요청한 사용자.
+        project_id: 대상 프로젝트 ID.
+        member_id: 상태를 변경할 멤버십 ID.
+        next_status: 변경할 멤버 상태.
+        description: 반려 또는 내보내기 사유.
+        update_description: description 필드 갱신 여부.
+
+    Raises:
+        Project.DoesNotExist: 프로젝트가 존재하지 않는 경우.
+        Member.DoesNotExist: 변경 가능한 일반 멤버가 존재하지 않는 경우.
+        ValidationError: 팀장 권한이나 상태 전이 조건을 만족하지 않는 경우.
+    """
+    leader_members = Member.objects.filter(
+        project=OuterRef("pk"),
+        user=actor,
+        is_leader=True,
+        status=Member.Status.JOINED,
+    )
+
+    with transaction.atomic():
+        project = (
+            Project.objects.select_for_update()
+            .annotate(is_leader=Exists(leader_members))
+            .get(pk=project_id)
+        )
+        if not project.is_leader:
+            raise ValidationError(
+                "프로젝트 리더만 멤버 상태를 변경할 수 있습니다.",
+                code="leader_required",
+            )
+
+        member = (
+            Member.objects.select_for_update()
+            .get(project_id=project_id, pk=member_id, is_leader=False)
+        )
+        member.project = project
+        member.transition_to(
+            next_status,
+            description=description,
+            update_description=update_description,
+            require_description=next_status == Member.Status.LEFT,
+        )
+        member.save(
             update_fields=(
                 "status",
                 "description",
