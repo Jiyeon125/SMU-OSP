@@ -159,6 +159,7 @@ class Projects(APIView):
             )
 
         project = result.project
+        project.request_user_memberships = [result.leader_member]
         detail = None
         if result.repository_error is not None:
             error = result.repository_error

@@ -44,10 +44,12 @@ class ProjectCreationResult:
 
     Attributes:
         project: 생성된 프로젝트.
+        leader_member: 생성된 팀장 멤버십.
         repository_error: Repository 등록 실패 오류. 성공하면 None.
     """
 
     project: Project
+    leader_member: Member
     repository_error: ValueError | None
 
 
@@ -204,7 +206,6 @@ def create_project(
             is_leader=True,
             status=Member.Status.JOINED,
         )
-        project.request_user_memberships = [leader_member]
 
     repository_error: ValueError | None = None
     try:
@@ -214,5 +215,6 @@ def create_project(
 
     return ProjectCreationResult(
         project=project,
+        leader_member=leader_member,
         repository_error=repository_error,
     )
