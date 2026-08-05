@@ -40,7 +40,12 @@ class RepositoryRegistrationError(ValueError):
 
 @dataclass(frozen=True)
 class ProjectCreationResult:
-    """프로젝트 생성 결과와 비치명적 Repository 등록 오류를 나타낸다."""
+    """프로젝트 생성 결과와 비치명적 Repository 등록 오류를 나타낸다.
+
+    Attributes:
+        project: 생성된 프로젝트.
+        repository_error: Repository 등록 실패 오류. 성공하면 None.
+    """
 
     project: Project
     repository_error: ValueError | None
@@ -169,6 +174,21 @@ def create_project(
 
     Repository 등록 실패는 프로젝트 생성을 롤백하지 않고 결과에 담아
     반환한다. GitHub 조회는 프로젝트 생성 트랜잭션이 끝난 뒤 수행한다.
+
+    Args:
+        actor: 프로젝트를 생성하는 사용자.
+        name: 프로젝트명.
+        description: 프로젝트 설명.
+        repository_url: 연결할 Repository URL.
+        demo_url: 결과물 URL.
+        presentation_url: 발표 자료 URL.
+        languages: 프로젝트에 연결할 사용 언어.
+
+    Returns:
+        생성된 프로젝트와 Repository 등록 오류를 담은 결과.
+
+    Raises:
+        IntegrityError: 프로젝트 또는 팀장 멤버십 저장에 실패한 경우.
     """
     with transaction.atomic():
         project = Project.objects.create(
