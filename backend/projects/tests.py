@@ -1,12 +1,19 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
+from threading import Barrier
 from unittest.mock import ANY, Mock, patch
 
 import requests
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, connection, transaction
-from django.test import TestCase, override_settings
+from django.db import (
+    IntegrityError,
+    close_old_connections,
+    connection,
+    transaction,
+)
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 
 from .models import (
@@ -19,6 +26,7 @@ from .models import (
     RepositoryStatus,
 )
 from .serializers import ProjectDetailSerializer, RepositorySerializer
+from .services import create_membership_application
 from .tasks import (
     GITHUB_API_FAILED,
     PENDING,
@@ -568,6 +576,58 @@ class RepositoryRefreshTaskTests(TestCase):
             GITHUB_API_FAILED,
         )
         self.assertEqual(self.repository.status.fetched_at, fetched_at)
+
+
+class MembershipApplicationConcurrencyTests(TransactionTestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="concurrent-applicant",
+            password="password",
+            github_email="concurrent-applicant@example.com",
+            name="동시 신청자",
+            student_id=401,
+            major="IT공학",
+        )
+        self.project = Project.objects.create(
+            name="Concurrent Application Project",
+            description="동시 참가 신청 검증",
+        )
+
+    def test_concurrent_applications_create_one_pending_membership(self):
+        barrier = Barrier(2)
+
+        def apply() -> str:
+            close_old_connections()
+            try:
+                actor = get_user_model().objects.get(pk=self.user.pk)
+                barrier.wait()
+                create_membership_application(
+                    actor=actor,
+                    project_id=self.project.pk,
+                )
+            except ValidationError as error:
+                return str(error.code)
+            else:
+                return "created"
+            finally:
+                close_old_connections()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(apply) for _ in range(2)]
+            results = [future.result(timeout=5) for future in futures]
+
+        self.assertCountEqual(
+            results,
+            ["created", "membership_already_exists"],
+        )
+        self.assertEqual(
+            Member.objects.filter(
+                project=self.project,
+                user=self.user,
+                status=Member.Status.PENDING,
+            ).count(),
+            1,
+        )
 
 
 class ProjectApiTests(TestCase):

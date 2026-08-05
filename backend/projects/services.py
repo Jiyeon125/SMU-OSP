@@ -312,7 +312,8 @@ def create_membership_application(
 ) -> None:
     """프로젝트 참가 신청을 PENDING 멤버십으로 생성한다.
 
-    과거 신청 이력 전체를 Project의 신청 가능 여부 검증에 사용한다.
+    Project 행을 잠근 트랜잭션에서 과거 신청 이력을 다시 조회하고 신청
+    가능 여부를 검증해 같은 프로젝트의 동시 신청을 순차 처리한다.
 
     Args:
         actor: 참가 신청을 요청한 사용자.
@@ -322,21 +323,24 @@ def create_membership_application(
         Project.DoesNotExist: 프로젝트가 없거나 삭제된 경우.
         ValidationError: 프로젝트에 참가 신청할 수 없는 경우.
     """
-    project = Project.objects.exclude(
-        status=Project.Status.DELETED,
-    ).get(pk=project_id)
-    memberships = list(
-        Member.objects.filter(
+    with transaction.atomic():
+        project = (
+            Project.objects.exclude(status=Project.Status.DELETED)
+            .select_for_update()
+            .get(pk=project_id)
+        )
+        memberships = list(
+            Member.objects.filter(
+                project=project,
+                user=actor,
+            )
+        )
+        project.validate_membership_application(memberships)
+        Member.objects.create(
             project=project,
             user=actor,
+            status=Member.Status.PENDING,
         )
-    )
-    project.validate_membership_application(memberships)
-    Member.objects.create(
-        project=project,
-        user=actor,
-        status=Member.Status.PENDING,
-    )
 
 
 def get_membership_cancel_target(
