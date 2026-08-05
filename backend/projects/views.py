@@ -27,6 +27,7 @@ from .serializers import (
 )
 from .services import (
     RepositoryRegistrationError,
+    create_project,
     prepare_project_repository_update,
     update_project_repository,
 )
@@ -137,25 +138,16 @@ class Projects(APIView):
             )
 
         data = serializer.validated_data
-        repository_url = data.get("repository_url")
-        languages = data.get("languages", [])
-
         try:
-            with transaction.atomic():
-                project = Project.objects.create(
-                    name=data["name"],
-                    description=data["description"],
-                    demo_url=data.get("demo_url"),
-                    presentation_url=data.get("presentation_url"),
-                )
-                project.languages.set(languages)
-                leader_member = Member.objects.create(
-                    project=project,
-                    user=request.user,
-                    is_leader=True,
-                    status=Member.Status.JOINED,
-                )
-                project.request_user_memberships = [leader_member]
+            result = create_project(
+                actor=request.user,
+                name=data["name"],
+                description=data["description"],
+                repository_url=data.get("repository_url"),
+                demo_url=data.get("demo_url"),
+                presentation_url=data.get("presentation_url"),
+                languages=data.get("languages", []),
+            )
         except IntegrityError:
             return Response(
                 fail(
@@ -166,10 +158,10 @@ class Projects(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        project = result.project
         detail = None
-        try:
-            update_project_repository(project, repository_url)
-        except ValueError as error:
+        if result.repository_error is not None:
+            error = result.repository_error
             detail = {
                 "repositoryRegistration": {
                     "status": "FAILED",

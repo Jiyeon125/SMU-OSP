@@ -1554,7 +1554,7 @@ class ProjectApiTests(TestCase):
         self.client.force_login(self.user)
 
         with patch(
-            "projects.views.Member.objects.create",
+            "projects.services.Member.objects.create",
             side_effect=IntegrityError,
         ):
             response = self.client.post(

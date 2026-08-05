@@ -1,4 +1,9 @@
+from collections.abc import Sequence
+from dataclasses import dataclass
+
 from django.db import IntegrityError, transaction
+
+from users.models import User
 
 from .github_client import (
     GitHubClientError,
@@ -7,7 +12,7 @@ from .github_client import (
     fetch_repository_identity,
     parse_repository_url,
 )
-from .models import Project, Repository
+from .models import Member, Project, ProjectLanguage, Repository
 from .tasks import enqueue_repository_refresh
 
 REPOSITORY_ALREADY_LINKED_MESSAGE = (
@@ -31,6 +36,14 @@ class RepositoryRegistrationError(ValueError):
     def __init__(self, code: str, message: str):
         self.code = code
         super().__init__(message)
+
+
+@dataclass(frozen=True)
+class ProjectCreationResult:
+    """프로젝트 생성 결과와 비치명적 Repository 등록 오류를 나타낸다."""
+
+    project: Project
+    repository_error: ValueError | None
 
 
 def _registration_error(
@@ -139,4 +152,47 @@ def update_project_repository(
     transaction.on_commit(
         lambda: enqueue_repository_refresh(repository.pk),
         robust=True,
+    )
+
+
+def create_project(
+    *,
+    actor: User,
+    name: str,
+    description: str,
+    repository_url: str | None,
+    demo_url: str | None,
+    presentation_url: str | None,
+    languages: Sequence[ProjectLanguage],
+) -> ProjectCreationResult:
+    """프로젝트와 팀장 멤버십을 생성하고 Repository 등록을 시도한다.
+
+    Repository 등록 실패는 프로젝트 생성을 롤백하지 않고 결과에 담아
+    반환한다. GitHub 조회는 프로젝트 생성 트랜잭션이 끝난 뒤 수행한다.
+    """
+    with transaction.atomic():
+        project = Project.objects.create(
+            name=name,
+            description=description,
+            demo_url=demo_url,
+            presentation_url=presentation_url,
+        )
+        project.languages.set(languages)
+        leader_member = Member.objects.create(
+            project=project,
+            user=actor,
+            is_leader=True,
+            status=Member.Status.JOINED,
+        )
+        project.request_user_memberships = [leader_member]
+
+    repository_error: ValueError | None = None
+    try:
+        update_project_repository(project, repository_url)
+    except ValueError as error:
+        repository_error = error
+
+    return ProjectCreationResult(
+        project=project,
+        repository_error=repository_error,
     )
