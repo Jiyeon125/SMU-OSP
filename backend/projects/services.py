@@ -245,23 +245,7 @@ def create_project(
     )
 
 
-def _ensure_project_editor(
-    *,
-    project: Project,
-    actor: User | AnonymousUser,
-) -> None:
-    if not actor.is_authenticated:
-        raise PermissionDenied
-
-    member = get_joined_project_member(
-        project_id=project.pk,
-        user_id=actor.pk,
-    )
-    if not project.is_leader(member):
-        raise PermissionDenied
-
-
-def _ensure_project_deleter(
+def _ensure_project_leader(
     *,
     project: Project,
     actor: User | AnonymousUser,
@@ -288,9 +272,10 @@ def update_project(
     languages: Sequence[ProjectLanguage],
     status: str,
 ) -> None:
-    """프로젝트와 연결 정보를 잠금 상태에서 수정한다.
+    """프로젝트와 연결 정보를 수정한다.
 
-    잠금 후 팀장 권한을 확인하고 Project, 언어, Repository 순서로 갱신한다.
+    GitHub 조회와 같은 외부 요청은 트랜잭션 외부에서 수행하고,
+    DB 잠금 구간에서는 권한 재검증·갱신만 수행한다.
 
     Args:
         actor: 프로젝트 수정을 요청한 사용자.
@@ -309,19 +294,27 @@ def update_project(
         RepositoryRegistrationError: Repository 등록에 실패한 경우.
         ValueError: 상태 전이 또는 Repository 변경이 허용되지 않는 경우.
     """
+    project_for_update = (
+        Project.objects.select_related("repository").get(pk=project_id)
+    )
+    _ensure_project_leader(
+        project=project_for_update,
+        actor=actor,
+    )
+    repository_data = prepare_project_repository_update(
+        project_for_update,
+        repository_url,
+    )
+
     with transaction.atomic():
         project = (
             Project.objects.select_for_update()
             .select_related("repository")
             .get(pk=project_id)
         )
-        _ensure_project_editor(
+        _ensure_project_leader(
             project=project,
             actor=actor,
-        )
-        repository_data = prepare_project_repository_update(
-            project,
-            repository_url,
         )
 
         previous_project_status = project.status
@@ -358,7 +351,7 @@ def mark_project_deleted(
     """
     with transaction.atomic():
         project = Project.objects.select_for_update().get(pk=project_id)
-        _ensure_project_deleter(
+        _ensure_project_leader(
             project=project,
             actor=actor,
         )
