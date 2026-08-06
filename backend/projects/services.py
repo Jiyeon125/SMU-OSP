@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, transaction
+from django.db.models import Exists, OuterRef, Q, QuerySet
 
 from users.models import User
 
@@ -15,7 +16,6 @@ from .github_client import (
     parse_repository_url,
 )
 from .models import Member, Project, ProjectLanguage, Repository
-from .selectors import get_joined_project_member
 from .tasks import enqueue_repository_refresh
 
 REPOSITORY_ALREADY_LINKED_MESSAGE = (
@@ -105,11 +105,6 @@ def prepare_repository_registration(
         data = fetch_repository_identity(full_name)
     except GitHubClientError as error:
         raise _registration_error(error) from error
-    if Repository.objects.filter(github_id=data.github_id).exists():
-        raise RepositoryRegistrationError(
-            "INVALID_PROJECT_INPUT",
-            REPOSITORY_ALREADY_LINKED_MESSAGE,
-        )
     return data
 
 
@@ -151,12 +146,10 @@ def update_project_repository(
         return
 
     data = repository_data or prepare_repository_registration(repository_url)
-    if Repository.objects.filter(full_name__iexact=data.full_name).exists():
-        raise RepositoryRegistrationError(
-            "INVALID_PROJECT_INPUT",
-            REPOSITORY_ALREADY_LINKED_MESSAGE,
-        )
-    if Repository.objects.filter(github_id=data.github_id).exists():
+    if Repository.objects.filter(
+        Q(full_name__iexact=data.full_name)
+        | Q(github_id=data.github_id)
+    ).exists():
         raise RepositoryRegistrationError(
             "INVALID_PROJECT_INPUT",
             REPOSITORY_ALREADY_LINKED_MESSAGE,
@@ -247,17 +240,27 @@ def create_project(
 
 def _ensure_project_leader(
     *,
-    project: Project,
     actor: User | AnonymousUser,
+    project: Project,
 ) -> None:
     if not actor.is_authenticated:
         raise PermissionDenied
-    member = get_joined_project_member(
-        project_id=project.pk,
-        user_id=actor.pk,
-    )
-    if not project.is_leader(member):
+    if not getattr(project, "actor_is_leader", None):
         raise PermissionDenied
+
+
+def _project_queryset_with_actor_leadership(
+    *, actor_id: int
+) -> QuerySet[Project]:
+    leader_membership = Member.objects.filter(
+        project_id=OuterRef("pk"),
+        user_id=actor_id,
+        status=Member.Status.JOINED,
+        is_leader=True,
+    )
+    return Project.objects.select_related("repository").annotate(
+        actor_is_leader=Exists(leader_membership)
+    )
 
 
 def update_project(
@@ -294,12 +297,16 @@ def update_project(
         RepositoryRegistrationError: Repository 등록에 실패한 경우.
         ValueError: 상태 전이 또는 Repository 변경이 허용되지 않는 경우.
     """
+    if not actor.is_authenticated:
+        raise PermissionDenied
+
     project_for_update = (
-        Project.objects.select_related("repository").get(pk=project_id)
+        _project_queryset_with_actor_leadership(actor_id=actor.pk)
+        .get(pk=project_id)
     )
     _ensure_project_leader(
-        project=project_for_update,
         actor=actor,
+        project=project_for_update,
     )
     repository_data = prepare_project_repository_update(
         project_for_update,
@@ -308,8 +315,8 @@ def update_project(
 
     with transaction.atomic():
         project = (
-            Project.objects.select_for_update()
-            .select_related("repository")
+            _project_queryset_with_actor_leadership(actor_id=actor.pk)
+            .select_for_update()
             .get(pk=project_id)
         )
         _ensure_project_leader(
@@ -350,7 +357,11 @@ def mark_project_deleted(
         ValueError: 현재 상태에서 삭제 상태로 전환할 수 없는 경우.
     """
     with transaction.atomic():
-        project = Project.objects.select_for_update().get(pk=project_id)
+        project = (
+            _project_queryset_with_actor_leadership(actor_id=actor.pk)
+            .select_for_update()
+            .get(pk=project_id)
+        )
         _ensure_project_leader(
             project=project,
             actor=actor,

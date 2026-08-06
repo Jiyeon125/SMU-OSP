@@ -1454,6 +1454,49 @@ class ProjectApiTests(TestCase):
         )
 
     @patch("projects.github_client.requests.get")
+    def test_project_repository_add_rejects_existing_github_id(
+        self,
+        request_get,
+    ):
+        request_get.return_value.status_code = 200
+        request_get.return_value.json.return_value = {
+            "id": 303,
+            "name": "renamed-project",
+            "full_name": "example/renamed-project",
+            "html_url": "https://github.com/example/renamed-project",
+            "private": False,
+        }
+        self.repository.delete()
+        existing_project = Project.objects.create(
+            name="Existing Repository Project",
+            description="동일 GitHub Repository가 연결된 프로젝트",
+        )
+        Repository.objects.create(
+            project=existing_project,
+            github_id=303,
+            name="old-project",
+            full_name="example/old-project",
+            html_url="https://github.com/example/old-project",
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.put(
+            f"/api/v1/projects/{self.project.pk}",
+            data=self.project_update_payload(
+                repositoryUrl="https://github.com/example/renamed-project"
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["status"], "INVALID_PROJECT_INPUT")
+        self.assertEqual(
+            response.json()["detail"]["message"],
+            "이미 다른 프로젝트에 연결된 Repository입니다.",
+        )
+        self.assertFalse(Repository.objects.filter(project=self.project).exists())
+
+    @patch("projects.github_client.requests.get")
     def test_project_update_rolls_back_when_repository_lookup_fails(
         self,
         request_get,
