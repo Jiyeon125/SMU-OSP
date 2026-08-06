@@ -174,3 +174,5 @@ cython_debug/
 dist/
 static/
 
+# Linter / formatter
+.ruff_cache/
