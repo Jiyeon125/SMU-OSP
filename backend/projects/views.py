@@ -30,7 +30,6 @@ from .services import (
     ProjectCreationError,
     RepositoryRegistrationError,
     create_project,
-    get_project_update_target,
     mark_project_deleted,
     update_project,
 )
@@ -226,13 +225,18 @@ class ProjectDetail(APIView):
 
     def put(self, request, pk):
         try:
-            project = get_project_update_target(
-                actor=request.user,
-                project_id=pk,
-            )
+            if not Project.objects.filter(pk=pk).exists():
+                return Response(
+                    fail(
+                        "PROJECT_NOT_FOUND",
+                        f"id={pk}에 해당하는 프로젝트를 찾을 수 없습니다.",
+                        status.HTTP_404_NOT_FOUND,
+                    ),
+                    status=status.HTTP_404_NOT_FOUND,
+                )
             serializer = ProjectUpdateSerializer(
-                project,
                 data=request.data,
+                context={"project_id": pk},
             )
             serializer.is_valid(raise_exception=True)
             data = serializer.validated_data

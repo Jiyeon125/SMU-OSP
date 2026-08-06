@@ -121,23 +121,32 @@ class Project(CommonModel):
     )
     max_members = models.PositiveIntegerField(default=get_default_max_members)
 
-    def can_be_edited_by(self, member: Member | None) -> bool:
-        """멤버가 진행 중인 프로젝트를 수정할 수 있는지 반환한다.
+    def is_leader(self, member: Member | None) -> bool:
+        """멤버십이 팀장인지 확인한다.
 
         Args:
-            member: 수정 권한을 확인할 멤버십. 멤버십이 없으면 None.
+            member: 확인할 멤버십. 멤버십이 없으면 None.
 
         Returns:
-            프로젝트가 진행 중이고 같은 프로젝트의 참여 중 팀장이면 True,
-            아니면 False.
+            멤버십이 존재하고 팀장(JOINED + is_leader)이면 True, 아니면 False.
         """
         return bool(
             member
             and member.project_id == self.pk
             and member.status == Member.Status.JOINED
             and member.is_leader
-            and self.status == self.Status.ACTIVE
         )
+
+    def can_be_edited_by(self, member: Member | None) -> bool:
+        """멤버가 해당 프로젝트를 관리할 수 있는지 반환한다.
+
+        Args:
+            member: 관리 권한을 확인할 멤버십. 멤버십이 없으면 None.
+
+        Returns:
+            프로젝트가 진행 중이면서 멤버십이 팀장이라면 True, 아니면 False.
+        """
+        return self.status == self.Status.ACTIVE and self.is_leader(member)
 
     def has_available_member_slot(self):
         joined_members = getattr(self, "joined_members", None)
