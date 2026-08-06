@@ -245,7 +245,7 @@ def _ensure_project_leader(
 ) -> None:
     if not actor.is_authenticated:
         raise PermissionDenied
-    if not getattr(project, "actor_is_leader", None):
+    if not project.actor_is_leader:
         raise PermissionDenied
 
 
@@ -258,7 +258,7 @@ def _project_queryset_with_actor_leadership(
         status=Member.Status.JOINED,
         is_leader=True,
     )
-    return Project.objects.select_related("repository").annotate(
+    return Project.objects.annotate(
         actor_is_leader=Exists(leader_membership)
     )
 
@@ -302,6 +302,7 @@ def update_project(
 
     project_for_update = (
         _project_queryset_with_actor_leadership(actor_id=actor.pk)
+        .select_related("repository")
         .get(pk=project_id)
     )
     _ensure_project_leader(
@@ -316,6 +317,7 @@ def update_project(
     with transaction.atomic():
         project = (
             _project_queryset_with_actor_leadership(actor_id=actor.pk)
+            .select_related("repository")
             .select_for_update()
             .get(pk=project_id)
         )
@@ -356,6 +358,9 @@ def mark_project_deleted(
         PermissionDenied: 요청자가 프로젝트 팀장이 아닌 경우.
         ValueError: 현재 상태에서 삭제 상태로 전환할 수 없는 경우.
     """
+    if not actor.is_authenticated:
+        raise PermissionDenied
+
     with transaction.atomic():
         project = (
             _project_queryset_with_actor_leadership(actor_id=actor.pk)

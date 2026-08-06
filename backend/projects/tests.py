@@ -1391,6 +1391,50 @@ class ProjectApiTests(TestCase):
         )
 
     @patch("projects.github_client.requests.get")
+    def test_create_project_rejects_existing_github_id(
+        self,
+        request_get,
+    ):
+        request_get.return_value.status_code = 200
+        request_get.return_value.json.return_value = {
+            "id": 303,
+            "name": "renamed-project",
+            "full_name": "example/renamed-project",
+            "html_url": "https://github.com/example/renamed-project",
+            "private": False,
+        }
+        existing_project = Project.objects.create(
+            name="Existing GitHub ID Project",
+            description="동일 GitHub ID가 연결된 프로젝트",
+        )
+        Repository.objects.create(
+            project=existing_project,
+            github_id=303,
+            name="old-project",
+            full_name="example/old-project",
+            html_url="https://github.com/example/old-project",
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            "/api/v1/projects/",
+            data={
+                "name": "Renamed Repository Project",
+                "description": "동일 Repository는 연결하지 않습니다.",
+                "repositoryUrl": "https://github.com/example/renamed-project",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            response.json()["detail"]["repositoryRegistration"]["code"],
+            "INVALID_PROJECT_INPUT",
+        )
+        project = Project.objects.get(name="Renamed Repository Project")
+        self.assertFalse(Repository.objects.filter(project=project).exists())
+
+    @patch("projects.github_client.requests.get")
     def test_deleted_project_repository_cannot_be_reused(self, request_get):
         self.project.status = Project.Status.DELETED
         self.project.save(update_fields=("status", "updated_at"))
