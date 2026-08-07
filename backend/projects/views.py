@@ -290,13 +290,14 @@ class ProjectDetail(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         except RepositoryRegistrationError as error:
+            http_status = (
+                status.HTTP_500_INTERNAL_SERVER_ERROR
+                if error.code == "INTERNAL_SERVER_ERROR"
+                else status.HTTP_400_BAD_REQUEST
+            )
             return Response(
-                fail(
-                    error.code,
-                    str(error),
-                    status.HTTP_400_BAD_REQUEST,
-                ),
-                status=status.HTTP_400_BAD_REQUEST,
+                fail(error.code, str(error), http_status),
+                status=http_status,
             )
         except ValueError as error:
             return Response(
@@ -310,11 +311,11 @@ class ProjectDetail(APIView):
         except IntegrityError:
             return Response(
                 fail(
-                    "INVALID_PROJECT_INPUT",
+                    "INTERNAL_SERVER_ERROR",
                     "프로젝트 정보를 수정하지 못했습니다.",
-                    status.HTTP_400_BAD_REQUEST,
+                    status.HTTP_500_INTERNAL_SERVER_ERROR,
                 ),
-                status=status.HTTP_400_BAD_REQUEST,
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
         return Response(

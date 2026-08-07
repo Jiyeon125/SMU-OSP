@@ -242,7 +242,7 @@ class Project(CommonModel):
             self.Status.DELETED: set(),
         }
         if status not in allowed_transitions[self.status]:
-            raise ValueError("현재 프로젝트 상태에서는 수정할 수 없습니다.")
+            raise ValueError("현재 프로젝트 상태에서는 변경할 수 없습니다.")
 
     def set_status(self, status):
         self.assert_can_transition_to(status)

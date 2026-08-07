@@ -873,9 +873,47 @@ class ProjectApiTests(TestCase):
         self.assertEqual(response.json()["status"], "INVALID_PROJECT_INPUT")
         self.assertEqual(
             response.json()["detail"]["message"],
-            "현재 프로젝트 상태에서는 수정할 수 없습니다.",
+            "현재 프로젝트 상태에서는 변경할 수 없습니다.",
         )
         prepare_repository.assert_not_called()
+
+    @patch("projects.github_client.requests.get")
+    def test_project_update_returns_500_when_repository_save_fails(
+        self,
+        request_get,
+    ):
+        """Repository 저장 IntegrityError는 INTERNAL_SERVER_ERROR 500이다."""
+        Project.objects.filter(pk=self.project.pk).update(
+            status=Project.Status.ACTIVE,
+        )
+        Repository.objects.filter(project=self.project).delete()
+        request_get.return_value.status_code = 200
+        request_get.return_value.json.return_value = {
+            "id": 501,
+            "name": "save-fail",
+            "full_name": "example/save-fail",
+            "html_url": "https://github.com/example/save-fail",
+            "private": False,
+        }
+        self.client.force_login(self.user)
+
+        with patch(
+            "projects.services.Repository.objects.create",
+            side_effect=IntegrityError,
+        ):
+            response = self.client.put(
+                f"/api/v1/projects/{self.project.pk}",
+                data=self.project_update_payload(
+                    repositoryUrl="https://github.com/example/save-fail",
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(
+            response.json()["status"],
+            "INTERNAL_SERVER_ERROR",
+        )
 
     def test_project_detail_uses_normalized_repository_data(self):
         RepositorySnapshot.objects.create(
@@ -1304,7 +1342,7 @@ class ProjectApiTests(TestCase):
         self.assertEqual(response.json()["status"], "INVALID_PROJECT_INPUT")
         self.assertEqual(
             response.json()["detail"]["message"],
-            "현재 프로젝트 상태에서는 수정할 수 없습니다.",
+            "현재 프로젝트 상태에서는 변경할 수 없습니다.",
         )
         self.project.refresh_from_db()
         self.assertEqual(self.project.name, "SOSP")
