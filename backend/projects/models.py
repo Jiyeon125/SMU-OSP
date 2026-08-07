@@ -216,7 +216,15 @@ class Project(CommonModel):
                 code="project_capacity_reached",
             )
 
-    def set_status(self, status):
+    def assert_can_transition_to(self, status):
+        """현재 상태에서 목표 상태로 전이 가능한지 확인한다.
+
+        Args:
+            status: 전이하려는 프로젝트 상태.
+
+        Raises:
+            ValueError: 허용되지 않은 상태 전이인 경우.
+        """
         allowed_transitions = {
             self.Status.ACTIVE: {
                 self.Status.ACTIVE,
@@ -235,6 +243,9 @@ class Project(CommonModel):
         }
         if status not in allowed_transitions[self.status]:
             raise ValueError("현재 프로젝트 상태에서는 수정할 수 없습니다.")
+
+    def set_status(self, status):
+        self.assert_can_transition_to(status)
         self.status = status
         if status in {self.Status.FINISHED, self.Status.DELETED}:
             self.members.filter(status=Member.Status.PENDING).update(

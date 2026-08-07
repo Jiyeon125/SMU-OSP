@@ -238,6 +238,13 @@ def create_project(
     )
 
 
+def _writable_project_queryset(*, actor_id: int):
+    """삭제되지 않은 프로젝트에 팀장 annotation을 붙인 QuerySet."""
+    return Project.queryset_with_actor_leadership(
+        actor_id=actor_id
+    ).exclude(status=Project.Status.DELETED)
+
+
 def _ensure_actor_is_leader(
     *,
     actor: User | AnonymousUser,
@@ -297,7 +304,7 @@ def get_project_update_target(
     if not actor.is_authenticated:
         raise PermissionDenied
     project = (
-        Project.queryset_with_actor_leadership(actor_id=actor.pk)
+        _writable_project_queryset(actor_id=actor.pk)
         .select_related("repository")
         .get(pk=project_id)
     )
@@ -343,6 +350,9 @@ def update_project(
     if not actor.is_authenticated:
         raise PermissionDenied
 
+    # GitHub 조회 전에 상태 전이를 먼저 막아 불필요한 외부 호출을 줄인다.
+    project.assert_can_transition_to(status)
+
     repository_data = prepare_project_repository_update(
         project,
         repository_url,
@@ -350,12 +360,13 @@ def update_project(
 
     with transaction.atomic():
         locked_project = (
-            Project.queryset_with_actor_leadership(actor_id=actor.pk)
+            _writable_project_queryset(actor_id=actor.pk)
             .select_related("repository")
             .select_for_update()
             .get(pk=project.pk)
         )
         _ensure_actor_is_leader(actor=actor, project=locked_project)
+        locked_project.assert_can_transition_to(status)
 
         previous_project_status = locked_project.status
         locked_project.name = name
@@ -394,7 +405,7 @@ def mark_project_deleted(
 
     with transaction.atomic():
         project = (
-            Project.queryset_with_actor_leadership(actor_id=actor.pk)
+            _writable_project_queryset(actor_id=actor.pk)
             .select_for_update()
             .get(pk=project_id)
         )

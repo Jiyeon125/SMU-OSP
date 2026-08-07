@@ -824,6 +824,59 @@ class ProjectApiTests(TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["status"], "PROJECT_NOT_FOUND")
 
+    def test_deleted_project_cannot_be_updated_or_deleted(self):
+        """soft-delete 프로젝트는 쓰기 경로에서도 404로 숨긴다."""
+        self.project.status = Project.Status.DELETED
+        self.project.save(update_fields=("status", "updated_at"))
+        self.client.force_login(self.user)
+
+        update_response = self.client.put(
+            f"/api/v1/projects/{self.project.pk}",
+            data=self.project_update_payload(name="삭제된 프로젝트 수정"),
+            content_type="application/json",
+        )
+        delete_response = self.client.delete(
+            f"/api/v1/projects/{self.project.pk}"
+        )
+
+        self.assertEqual(update_response.status_code, 404)
+        self.assertEqual(
+            update_response.json()["status"],
+            "PROJECT_NOT_FOUND",
+        )
+        self.assertEqual(delete_response.status_code, 404)
+        self.assertEqual(
+            delete_response.json()["status"],
+            "PROJECT_NOT_FOUND",
+        )
+
+    @patch("projects.services.prepare_project_repository_update")
+    def test_finished_project_update_rejects_before_repository_prepare(
+        self,
+        prepare_repository,
+    ):
+        """FINISHED 수정 거절은 GitHub/Repository 준비보다 먼저다."""
+        self.project.status = Project.Status.FINISHED
+        self.project.save(update_fields=("status", "updated_at"))
+        self.client.force_login(self.user)
+
+        response = self.client.put(
+            f"/api/v1/projects/{self.project.pk}",
+            data=self.project_update_payload(
+                name="완료 프로젝트 수정",
+                status=Project.Status.FINISHED,
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["status"], "INVALID_PROJECT_INPUT")
+        self.assertEqual(
+            response.json()["detail"]["message"],
+            "현재 프로젝트 상태에서는 수정할 수 없습니다.",
+        )
+        prepare_repository.assert_not_called()
+
     def test_project_detail_uses_normalized_repository_data(self):
         RepositorySnapshot.objects.create(
             repository=self.repository,
@@ -1171,7 +1224,11 @@ class ProjectApiTests(TestCase):
             data=self.project_update_payload(status=Project.Status.ACTIVE),
             content_type="application/json",
         )
-        self.assertEqual(restore_response.status_code, 400)
+        self.assertEqual(restore_response.status_code, 404)
+        self.assertEqual(
+            restore_response.json()["status"],
+            "PROJECT_NOT_FOUND",
+        )
         self.project.refresh_from_db()
         self.assertEqual(self.project.status, Project.Status.DELETED)
 
