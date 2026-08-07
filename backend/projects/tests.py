@@ -1038,6 +1038,10 @@ class ProjectApiTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["status"], "PERMISSION_DENIED")
+        self.assertEqual(
+            response.json()["detail"]["message"],
+            "프로젝트 팀장만 수정할 수 있습니다.",
+        )
         self.project.refresh_from_db()
         self.assertEqual(self.project.name, "SOSP")
 
@@ -1069,6 +1073,10 @@ class ProjectApiTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["status"], "PERMISSION_DENIED")
+        self.assertEqual(
+            response.json()["detail"]["message"],
+            "프로젝트 팀장만 수정할 수 있습니다.",
+        )
         self.project.refresh_from_db()
         self.assertEqual(self.project.name, "SOSP")
 
@@ -1087,10 +1095,18 @@ class ProjectApiTests(TestCase):
             update_response.json()["status"],
             "PERMISSION_DENIED",
         )
+        self.assertEqual(
+            update_response.json()["detail"]["message"],
+            "로그인이 필요합니다.",
+        )
         self.assertEqual(delete_response.status_code, 403)
         self.assertEqual(
             delete_response.json()["status"],
             "PERMISSION_DENIED",
+        )
+        self.assertEqual(
+            delete_response.json()["detail"]["message"],
+            "로그인이 필요합니다.",
         )
         self.project.refresh_from_db()
         self.assertEqual(self.project.status, Project.Status.ACTIVE)
@@ -1108,6 +1124,10 @@ class ProjectApiTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["status"], "PERMISSION_DENIED")
+        self.assertEqual(
+            response.json()["detail"]["message"],
+            "로그인이 필요합니다.",
+        )
         self.project.refresh_from_db()
         self.assertEqual(self.project.name, "SOSP")
 

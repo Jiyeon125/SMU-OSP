@@ -245,8 +245,12 @@ def _ensure_actor_is_leader(
 ) -> None:
     """요청자가 프로젝트 팀장인지 확인한다.
 
-    `queryset_with_actor_leadership()`로 조회된 경우 annotation을 쓰고,
-    그렇지 않으면 Member를 읽어 `Project.is_leader()`로 확인한다.
+    `can_be_edited_by()`는 ACTIVE 수정 UI용이라 FINISHED 삭제나
+    INACTIVE→ACTIVE 쓰기 경로에 쓰면 회귀한다. 쓰기 권한은
+    `Project.is_leader()`와 같은 조건으로만 판정한다.
+
+    `queryset_with_actor_leadership()`로 조회된 경우 Exists annotation을
+    쓰고, 그렇지 않으면 Member를 읽어 `Project.is_leader()`로 확인한다.
     """
     if not actor.is_authenticated:
         raise PermissionDenied
@@ -260,8 +264,9 @@ def _ensure_actor_is_leader(
             project_id=project.pk,
             user_id=actor.pk,
             status=Member.Status.JOINED,
-            is_leader=True,
-        ).first()
+        )
+        .order_by("-is_leader", "-created_at", "-pk")
+        .first()
     )
     if not project.is_leader(member):
         raise PermissionDenied

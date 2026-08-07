@@ -47,6 +47,18 @@ PROJECT_NOT_FOUND_MESSAGE = (
 )
 
 
+def _project_write_permission_denied_message(request, *, action: str) -> str:
+    """프로젝트 수정·삭제 403 메시지를 반환한다.
+
+    익명은 로그인 안내, 로그인 사용자는 팀장 권한 안내를 쓴다.
+    """
+    if not request.user.is_authenticated:
+        return "로그인이 필요합니다."
+    if action == "delete":
+        return "프로젝트 팀장만 삭제할 수 있습니다."
+    return "프로젝트 팀장만 수정할 수 있습니다."
+
+
 def _prepare_projects_for_serialization(projects: list[Project]) -> None:
     for project in projects:
         repository = getattr(project, "repository", None)
@@ -260,7 +272,10 @@ class ProjectDetail(APIView):
             return Response(
                 fail(
                     "PERMISSION_DENIED",
-                    "프로젝트 팀장만 수정할 수 있습니다.",
+                    _project_write_permission_denied_message(
+                        request,
+                        action="update",
+                    ),
                     status.HTTP_403_FORBIDDEN,
                 ),
                 status=status.HTTP_403_FORBIDDEN,
@@ -326,7 +341,10 @@ class ProjectDetail(APIView):
             return Response(
                 fail(
                     "PERMISSION_DENIED",
-                    "프로젝트 팀장만 삭제할 수 있습니다.",
+                    _project_write_permission_denied_message(
+                        request,
+                        action="delete",
+                    ),
                     status.HTTP_403_FORBIDDEN,
                 ),
                 status=status.HTTP_403_FORBIDDEN,
