@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, transaction
-from django.db.models import Exists, OuterRef, Q, QuerySet
+from django.db.models import Q
 
 from users.models import User
 
@@ -238,35 +238,70 @@ def create_project(
     )
 
 
-def _ensure_project_leader(
+def _leader_membership_for(
+    *,
+    project_id: int,
+    user_id: int,
+) -> Member | None:
+    """프로젝트 팀장 멤버십을 반환한다."""
+    return (
+        Member.objects.filter(
+            project_id=project_id,
+            user_id=user_id,
+            status=Member.Status.JOINED,
+            is_leader=True,
+        ).first()
+    )
+
+
+def _ensure_actor_is_leader(
     *,
     actor: User | AnonymousUser,
     project: Project,
 ) -> None:
+    """요청자가 프로젝트 팀장인지 Model 규칙으로 확인한다."""
     if not actor.is_authenticated:
         raise PermissionDenied
-    if not project.actor_is_leader:
+    member = _leader_membership_for(
+        project_id=project.pk,
+        user_id=actor.pk,
+    )
+    if not project.is_leader(member):
         raise PermissionDenied
 
 
-def _project_queryset_with_actor_leadership(
-    *, actor_id: int
-) -> QuerySet[Project]:
-    leader_membership = Member.objects.filter(
-        project_id=OuterRef("pk"),
-        user_id=actor_id,
-        status=Member.Status.JOINED,
-        is_leader=True,
-    )
-    return Project.objects.annotate(
-        actor_is_leader=Exists(leader_membership)
-    )
+def get_project_update_target(
+    *,
+    actor: User | AnonymousUser,
+    project_id: int,
+) -> Project:
+    """수정 입력 검증 전에 대상 프로젝트와 팀장 권한을 확인한다.
+
+    Serializer 실행보다 먼저 404·403을 결정하기 위해 사용한다.
+    Repository는 이후 사전 검증에 쓸 수 있도록 함께 조회한다.
+
+    Args:
+        actor: 프로젝트 수정을 요청한 사용자.
+        project_id: 수정 대상 프로젝트 ID.
+
+    Returns:
+        Repository가 함께 로드된 프로젝트.
+
+    Raises:
+        Project.DoesNotExist: 프로젝트가 존재하지 않는 경우.
+        PermissionDenied: 요청자가 인증되지 않았거나 팀장이 아닌 경우.
+    """
+    if not actor.is_authenticated:
+        raise PermissionDenied
+    project = Project.objects.select_related("repository").get(pk=project_id)
+    _ensure_actor_is_leader(actor=actor, project=project)
+    return project
 
 
 def update_project(
     *,
     actor: User | AnonymousUser,
-    project_id: int,
+    project: Project,
     name: str,
     description: str,
     repository_url: str | None,
@@ -277,12 +312,13 @@ def update_project(
 ) -> None:
     """프로젝트와 연결 정보를 수정한다.
 
-    GitHub 조회와 같은 외부 요청은 트랜잭션 외부에서 수행하고,
+    호출 전에 `get_project_update_target()`으로 대상과 팀장 권한을
+    확인하는 것을 전제로 한다. GitHub 조회는 트랜잭션 밖에서 수행하고,
     DB 잠금 구간에서는 권한 재검증·갱신만 수행한다.
 
     Args:
         actor: 프로젝트 수정을 요청한 사용자.
-        project_id: 수정할 프로젝트 ID.
+        project: 수정 대상 프로젝트. Repository가 함께 로드된 것이 좋다.
         name: 프로젝트명.
         description: 프로젝트 설명.
         repository_url: 연결할 Repository URL.
@@ -292,7 +328,7 @@ def update_project(
         status: 변경할 프로젝트 상태.
 
     Raises:
-        Project.DoesNotExist: 프로젝트가 존재하지 않는 경우.
+        Project.DoesNotExist: 잠금 재조회 시 프로젝트가 사라진 경우.
         PermissionDenied: 요청자가 프로젝트 팀장이 아닌 경우.
         RepositoryRegistrationError: Repository 등록에 실패한 경우.
         ValueError: 상태 전이 또는 Repository 변경이 허용되지 않는 경우.
@@ -300,42 +336,29 @@ def update_project(
     if not actor.is_authenticated:
         raise PermissionDenied
 
-    project_for_update = (
-        _project_queryset_with_actor_leadership(actor_id=actor.pk)
-        .select_related("repository")
-        .get(pk=project_id)
-    )
-    _ensure_project_leader(
-        actor=actor,
-        project=project_for_update,
-    )
     repository_data = prepare_project_repository_update(
-        project_for_update,
+        project,
         repository_url,
     )
 
     with transaction.atomic():
-        project = (
-            _project_queryset_with_actor_leadership(actor_id=actor.pk)
-            .select_related("repository")
+        locked_project = (
+            Project.objects.select_related("repository")
             .select_for_update()
-            .get(pk=project_id)
+            .get(pk=project.pk)
         )
-        _ensure_project_leader(
-            project=project,
-            actor=actor,
-        )
+        _ensure_actor_is_leader(actor=actor, project=locked_project)
 
-        previous_project_status = project.status
-        project.name = name
-        project.description = description
-        project.demo_url = demo_url
-        project.presentation_url = presentation_url
-        project.set_status(status)
-        project.save()
-        project.languages.set(languages)
+        previous_project_status = locked_project.status
+        locked_project.name = name
+        locked_project.description = description
+        locked_project.demo_url = demo_url
+        locked_project.presentation_url = presentation_url
+        locked_project.set_status(status)
+        locked_project.save()
+        locked_project.languages.set(languages)
         update_project_repository(
-            project,
+            locked_project,
             repository_url,
             previous_project_status=previous_project_status,
             repository_data=repository_data,
@@ -362,14 +385,7 @@ def mark_project_deleted(
         raise PermissionDenied
 
     with transaction.atomic():
-        project = (
-            _project_queryset_with_actor_leadership(actor_id=actor.pk)
-            .select_for_update()
-            .get(pk=project_id)
-        )
-        _ensure_project_leader(
-            project=project,
-            actor=actor,
-        )
+        project = Project.objects.select_for_update().get(pk=project_id)
+        _ensure_actor_is_leader(actor=actor, project=project)
         project.set_status(Project.Status.DELETED)
         project.save(update_fields=("status", "updated_at"))

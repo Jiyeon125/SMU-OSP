@@ -1041,6 +1041,37 @@ class ProjectApiTests(TestCase):
         self.project.refresh_from_db()
         self.assertEqual(self.project.name, "SOSP")
 
+    def test_non_leader_invalid_update_payload_is_still_forbidden(self):
+        """입력 오류보다 팀장 권한 없음(403)이 먼저 반환되는지 확인한다."""
+        teammate = get_user_model().objects.create_user(
+            username="nonleader-invalid",
+            password="password",
+            github_email="nonleader-invalid@sookmyung.ac.kr",
+            name="입력오류 팀원",
+            student_id=228,
+            major="컴퓨터과학",
+        )
+        Member.objects.create(
+            project=self.project,
+            user=teammate,
+            status=Member.Status.JOINED,
+        )
+        self.client.force_login(teammate)
+
+        response = self.client.put(
+            f"/api/v1/projects/{self.project.pk}",
+            data=self.project_update_payload(
+                name="",
+                status="NOT_A_STATUS",
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["status"], "PERMISSION_DENIED")
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.name, "SOSP")
+
     def test_anonymous_user_cannot_update_or_delete_project(self):
         update_response = self.client.put(
             f"/api/v1/projects/{self.project.pk}",
@@ -1063,6 +1094,22 @@ class ProjectApiTests(TestCase):
         )
         self.project.refresh_from_db()
         self.assertEqual(self.project.status, Project.Status.ACTIVE)
+
+    def test_anonymous_invalid_update_payload_is_still_forbidden(self):
+        """익명 요청은 Serializer 검증 전에 403을 반환한다."""
+        response = self.client.put(
+            f"/api/v1/projects/{self.project.pk}",
+            data=self.project_update_payload(
+                name="",
+                status="NOT_A_STATUS",
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["status"], "PERMISSION_DENIED")
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.name, "SOSP")
 
     def test_project_completion_cancels_pending_memberships(self):
         pending = Member.objects.create(

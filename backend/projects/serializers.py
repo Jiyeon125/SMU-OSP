@@ -177,11 +177,10 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
             allow_newlines=False,
         )
         projects_with_same_name = Project.objects.filter(name=name)
-        project_id = self.context.get("project_id")
         if self.instance:
-            project_id = self.instance.pk
-        if project_id:
-            projects_with_same_name = projects_with_same_name.exclude(pk=project_id)
+            projects_with_same_name = projects_with_same_name.exclude(
+                pk=self.instance.pk
+            )
         if projects_with_same_name.exists():
             raise serializers.ValidationError(
                 {"name": "이미 등록된 프로젝트명입니다."}
