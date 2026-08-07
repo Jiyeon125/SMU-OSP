@@ -292,6 +292,38 @@ def _actor_leader_membership_queryset(*, actor_id: int):
     )
 
 
+def _get_visible_project_for_actor(
+    *,
+    project_id: int,
+    actor: User,
+    for_update: bool = False,
+) -> Project:
+    """삭제되지 않은 프로젝트에 요청자 팀장 여부를 붙여 조회한다."""
+    queryset = Project.objects.exclude(
+        status=Project.Status.DELETED,
+    ).annotate(
+        actor_is_leader=Exists(
+            _actor_leader_membership_queryset(actor_id=actor.pk)
+        )
+    )
+    if for_update:
+        queryset = queryset.select_for_update()
+    return queryset.get(pk=project_id)
+
+
+def _require_actor_is_leader(project: Project) -> None:
+    """요청자가 해당 프로젝트 팀장인지 확인하고 아니면 거부한다.
+
+    멤버 관리 쓰기 권한의 공통 판정이다. 조기 거절과 Service 잠금 후
+    재확인이 같은 규칙·메시지를 쓰도록 여기에만 둔다.
+    """
+    if not getattr(project, "actor_is_leader", False):
+        raise ValidationError(
+            "프로젝트 리더만 멤버 상태를 변경할 수 있습니다.",
+            code="leader_required",
+        )
+
+
 def create_membership_application(
     *,
     actor: User,
@@ -403,27 +435,18 @@ def get_project_member_management_target(
 ) -> Project:
     """멤버 상태 변경 입력 검증 전에 프로젝트와 팀장 권한을 확인한다.
 
-    입력 검증보다 앞선 조기 거절용이다. 실제 변경의 권한 기준은
+    입력 검증보다 앞선 조기 거절용이다. 권한의 기준(최종 차단)은
     `change_project_member_status()`의 잠금 후 재확인이다.
 
     Raises:
         Project.DoesNotExist: 프로젝트가 없거나 삭제된 경우.
         ValidationError: 요청자가 팀장이 아닌 경우.
     """
-    project = (
-        Project.objects.exclude(status=Project.Status.DELETED)
-        .annotate(
-            actor_is_leader=Exists(
-                _actor_leader_membership_queryset(actor_id=actor.pk)
-            )
-        )
-        .get(pk=project_id)
+    project = _get_visible_project_for_actor(
+        project_id=project_id,
+        actor=actor,
     )
-    if not project.actor_is_leader:
-        raise ValidationError(
-            "프로젝트 리더만 멤버 상태를 변경할 수 있습니다.",
-            code="leader_required",
-        )
+    _require_actor_is_leader(project)
     return project
 
 
@@ -438,9 +461,9 @@ def change_project_member_status(
 ) -> None:
     """팀장이 프로젝트 멤버의 상태를 변경한다.
 
-    권한 검증의 기준은 이 함수다. View의
+    권한 검증의 기준(최종 차단)은 이 함수다. View의
     `get_project_member_management_target()`은 입력 검증 전 조기 거절용이며,
-    잠금 획득 후 여기서 팀장 여부를 다시 확인한다.
+    잠금 획득 후 여기서 같은 규칙으로 팀장 여부를 다시 확인한다.
 
     Project를 먼저 잠근 뒤 대상 Member를 잠가 승인 시 정원 검사와 상태
     변경이 같은 트랜잭션에서 수행되도록 한다. Member에는 잠긴 Project
@@ -460,21 +483,12 @@ def change_project_member_status(
         ValidationError: 팀장 권한이나 상태 전이 조건을 만족하지 않는 경우.
     """
     with transaction.atomic():
-        project = (
-            Project.objects.exclude(status=Project.Status.DELETED)
-            .select_for_update()
-            .annotate(
-                actor_is_leader=Exists(
-                    _actor_leader_membership_queryset(actor_id=actor.pk)
-                )
-            )
-            .get(pk=project_id)
+        project = _get_visible_project_for_actor(
+            project_id=project_id,
+            actor=actor,
+            for_update=True,
         )
-        if not project.actor_is_leader:
-            raise ValidationError(
-                "프로젝트 리더만 멤버 상태를 변경할 수 있습니다.",
-                code="leader_required",
-            )
+        _require_actor_is_leader(project)
 
         member = (
             Member.objects.select_for_update()
