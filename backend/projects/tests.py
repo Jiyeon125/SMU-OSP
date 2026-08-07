@@ -18,7 +18,7 @@ from .models import (
     RepositorySnapshot,
     RepositoryStatus,
 )
-from .serializers import RepositorySerializer
+from .serializers import ProjectUpdateSerializer, RepositorySerializer
 from .tasks import (
     GITHUB_API_FAILED,
     PENDING,
@@ -1248,6 +1248,16 @@ class ProjectApiTests(TestCase):
         )
         self.project.refresh_from_db()
         self.assertEqual(self.project.name, "SOSP")
+
+    def test_project_update_serializer_validates_without_instance(self):
+        """수정 Serializer는 기존 row(instance) 없이 URL pk만으로 검증한다."""
+        serializer = ProjectUpdateSerializer(
+            data=self.project_update_payload(name=self.project.name),
+            context={"project_id": self.project.pk},
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(serializer.validated_data["name"], "SOSP")
 
     def test_project_completion_cancels_pending_memberships(self):
         pending = Member.objects.create(

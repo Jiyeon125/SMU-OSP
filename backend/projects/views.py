@@ -243,8 +243,8 @@ class ProjectDetail(APIView):
                 project_id=pk,
             )
             serializer = ProjectUpdateSerializer(
-                project,
                 data=request.data,
+                context={"project_id": pk},
             )
             serializer.is_valid(raise_exception=True)
             data = serializer.validated_data
