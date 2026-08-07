@@ -6,6 +6,7 @@ from typing import Final
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Exists, OuterRef
 from django.utils import timezone
 
 from common.models import CommonModel
@@ -120,6 +121,39 @@ class Project(CommonModel):
         default=Status.ACTIVE,
     )
     max_members = models.PositiveIntegerField(default=get_default_max_members)
+
+    @classmethod
+    def actor_leader_membership_queryset(cls, *, actor_id: int):
+        """`is_leader()`가 True인 멤버십과 같은 조건의 Exists용 QuerySet.
+
+        Args:
+            actor_id: 팀장 여부를 확인할 사용자 ID.
+
+        Returns:
+            요청 프로젝트의 JOINED 팀장 멤버십을 가리키는 QuerySet.
+        """
+        return Member.objects.filter(
+            project_id=OuterRef("pk"),
+            user_id=actor_id,
+            status=Member.Status.JOINED,
+            is_leader=True,
+        )
+
+    @classmethod
+    def queryset_with_actor_leadership(cls, *, actor_id: int):
+        """요청자 팀장 여부를 `actor_is_leader`로 annotate한 Project QuerySet.
+
+        Args:
+            actor_id: 팀장 여부를 확인할 사용자 ID.
+
+        Returns:
+            `actor_is_leader` annotation이 포함된 Project QuerySet.
+        """
+        return cls.objects.annotate(
+            actor_is_leader=Exists(
+                cls.actor_leader_membership_queryset(actor_id=actor_id)
+            )
+        )
 
     def is_leader(self, member: Member | None) -> bool:
         """멤버십이 팀장인지 확인한다.

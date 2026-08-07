@@ -238,33 +238,30 @@ def create_project(
     )
 
 
-def _leader_membership_for(
-    *,
-    project_id: int,
-    user_id: int,
-) -> Member | None:
-    """프로젝트 팀장 멤버십을 반환한다."""
-    return (
-        Member.objects.filter(
-            project_id=project_id,
-            user_id=user_id,
-            status=Member.Status.JOINED,
-            is_leader=True,
-        ).first()
-    )
-
-
 def _ensure_actor_is_leader(
     *,
     actor: User | AnonymousUser,
     project: Project,
 ) -> None:
-    """요청자가 프로젝트 팀장인지 Model 규칙으로 확인한다."""
+    """요청자가 프로젝트 팀장인지 확인한다.
+
+    `queryset_with_actor_leadership()`로 조회된 경우 annotation을 쓰고,
+    그렇지 않으면 Member를 읽어 `Project.is_leader()`로 확인한다.
+    """
     if not actor.is_authenticated:
         raise PermissionDenied
-    member = _leader_membership_for(
-        project_id=project.pk,
-        user_id=actor.pk,
+    actor_is_leader = getattr(project, "actor_is_leader", None)
+    if actor_is_leader is not None:
+        if not actor_is_leader:
+            raise PermissionDenied
+        return
+    member = (
+        Member.objects.filter(
+            project_id=project.pk,
+            user_id=actor.pk,
+            status=Member.Status.JOINED,
+            is_leader=True,
+        ).first()
     )
     if not project.is_leader(member):
         raise PermissionDenied
@@ -279,6 +276,7 @@ def get_project_update_target(
 
     Serializer 실행보다 먼저 404·403을 결정하기 위해 사용한다.
     Repository는 이후 사전 검증에 쓸 수 있도록 함께 조회한다.
+    팀장 여부는 `Project.is_leader()`와 같은 조건을 Exists로 한 번에 조회한다.
 
     Args:
         actor: 프로젝트 수정을 요청한 사용자.
@@ -293,7 +291,11 @@ def get_project_update_target(
     """
     if not actor.is_authenticated:
         raise PermissionDenied
-    project = Project.objects.select_related("repository").get(pk=project_id)
+    project = (
+        Project.queryset_with_actor_leadership(actor_id=actor.pk)
+        .select_related("repository")
+        .get(pk=project_id)
+    )
     _ensure_actor_is_leader(actor=actor, project=project)
     return project
 
@@ -343,7 +345,8 @@ def update_project(
 
     with transaction.atomic():
         locked_project = (
-            Project.objects.select_related("repository")
+            Project.queryset_with_actor_leadership(actor_id=actor.pk)
+            .select_related("repository")
             .select_for_update()
             .get(pk=project.pk)
         )
@@ -385,7 +388,11 @@ def mark_project_deleted(
         raise PermissionDenied
 
     with transaction.atomic():
-        project = Project.objects.select_for_update().get(pk=project_id)
+        project = (
+            Project.queryset_with_actor_leadership(actor_id=actor.pk)
+            .select_for_update()
+            .get(pk=project_id)
+        )
         _ensure_actor_is_leader(actor=actor, project=project)
         project.set_status(Project.Status.DELETED)
         project.save(update_fields=("status", "updated_at"))
