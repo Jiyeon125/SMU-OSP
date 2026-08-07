@@ -2400,7 +2400,7 @@ class ProjectApiTests(TestCase):
         with self.assertRaises(ValidationError):
             membership.transition_to(Member.Status.LEFT)
 
-    def test_member_transition_to_requires_reason_when_requested(self):
+    def test_member_transition_to_requires_reason_for_left(self):
         membership = Member.objects.create(
             project=self.project,
             user=self.user,
@@ -2411,10 +2411,7 @@ class ProjectApiTests(TestCase):
             ValidationError,
             "멤버를 내보내려면 사유를 입력해주세요.",
         ):
-            membership.transition_to(
-                Member.Status.LEFT,
-                require_description=True,
-            )
+            membership.transition_to(Member.Status.LEFT)
 
         self.assertEqual(membership.status, Member.Status.JOINED)
 

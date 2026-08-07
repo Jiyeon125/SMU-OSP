@@ -282,11 +282,6 @@ def create_project(
     )
 
 
-def _visible_project_queryset():
-    """삭제되지 않은 프로젝트 QuerySet."""
-    return Project.objects.exclude(status=Project.Status.DELETED)
-
-
 def _actor_leader_membership_queryset(*, actor_id: int):
     """요청자가 JOINED 팀장인지 판정하는 Exists용 QuerySet."""
     return Member.objects.filter(
@@ -310,7 +305,9 @@ def create_membership_application(
         Project.DoesNotExist: 프로젝트가 없거나 삭제된 경우.
         ValidationError: 프로젝트에 참가 신청할 수 없는 경우.
     """
-    project = _visible_project_queryset().get(pk=project_id)
+    project = Project.objects.exclude(
+        status=Project.Status.DELETED,
+    ).get(pk=project_id)
     memberships = list(
         Member.objects.filter(
             project=project,
@@ -330,14 +327,17 @@ def get_membership_cancel_target(
     actor: User,
     project_id: int,
 ) -> Member:
-    """취소·탈퇴 입력 검증 전에 대상 멤버십과 전이 가능 여부를 확인한다.
+    """취소·탈퇴 입력 검증 전에 대상 존재와 구조적 전이 가능 여부를 확인한다.
+
+    삭제된 프로젝트는 멤버십이 남아 있어도 404로 거절한다. 사유(description)
+    검사는 body 파싱 이후 `cancel_or_leave_membership()`에서 수행한다.
 
     Raises:
         Project.DoesNotExist: 프로젝트가 없거나 삭제된 경우.
         Member.DoesNotExist: 사용자의 멤버십 이력이 없는 경우.
         ValidationError: 팀장 보호 또는 현재 상태에서 전이할 수 없는 경우.
     """
-    _visible_project_queryset().get(pk=project_id)
+    Project.objects.exclude(status=Project.Status.DELETED).get(pk=project_id)
     membership = (
         Member.objects.filter(project_id=project_id, user=actor)
         .order_by("-is_leader", "-created_at", "-pk")
@@ -345,7 +345,7 @@ def get_membership_cancel_target(
     )
     if membership is None:
         raise Member.DoesNotExist
-    membership.assert_can_transition_to()
+    membership.assert_transition_structure()
     return membership
 
 
@@ -358,11 +358,11 @@ def cancel_or_leave_membership(
 ) -> None:
     """최신 참가 신청을 취소하거나 일반 팀원이 프로젝트에서 탈퇴한다.
 
-    호출 전에 `get_membership_cancel_target()`으로 대상과 전이 가능
-    여부를 확인하는 것을 전제로 한다. 팀장 멤버십을 우선 조회해 이후에
-    생성된 신청 이력이 있더라도 팀장 보호 규칙을 우회하지 못하게 한다.
-    update_description이 참이면 description이 None인 경우도 저장하고,
-    거짓이면 기존 사유를 유지한다.
+    호출 전에 `get_membership_cancel_target()`으로 대상과 구조적 전이
+    가능 여부를 확인하는 것을 전제로 한다. 팀장 멤버십을 우선 조회해
+    이후에 생성된 신청 이력이 있더라도 팀장 보호 규칙을 우회하지 못하게
+    한다. update_description이 참이면 description이 None인 경우도
+    저장하고, 거짓이면 기존 사유를 유지한다.
 
     Raises:
         Project.DoesNotExist: 프로젝트가 없거나 삭제된 경우.
@@ -370,7 +370,9 @@ def cancel_or_leave_membership(
         ValidationError: 현재 멤버십 상태에서 전이할 수 없는 경우.
     """
     with transaction.atomic():
-        _visible_project_queryset().select_for_update().get(pk=project_id)
+        Project.objects.exclude(
+            status=Project.Status.DELETED,
+        ).select_for_update().get(pk=project_id)
         membership = (
             Member.objects.select_for_update()
             .filter(project_id=project_id, user=actor)
@@ -401,12 +403,15 @@ def get_project_member_management_target(
 ) -> Project:
     """멤버 상태 변경 입력 검증 전에 프로젝트와 팀장 권한을 확인한다.
 
+    입력 검증보다 앞선 조기 거절용이다. 실제 변경의 권한 기준은
+    `change_project_member_status()`의 잠금 후 재확인이다.
+
     Raises:
         Project.DoesNotExist: 프로젝트가 없거나 삭제된 경우.
         ValidationError: 요청자가 팀장이 아닌 경우.
     """
     project = (
-        _visible_project_queryset()
+        Project.objects.exclude(status=Project.Status.DELETED)
         .annotate(
             actor_is_leader=Exists(
                 _actor_leader_membership_queryset(actor_id=actor.pk)
@@ -433,11 +438,13 @@ def change_project_member_status(
 ) -> None:
     """팀장이 프로젝트 멤버의 상태를 변경한다.
 
-    호출 전에 `get_project_member_management_target()`으로 대상과 팀장
-    권한을 확인하는 것을 전제로 한다. Project를 먼저 잠근 뒤 대상
-    Member를 잠가 승인 시 정원 검사와 상태 변경이 같은 트랜잭션에서
-    수행되도록 한다. Member에는 잠긴 Project 인스턴스를 연결해 정원
-    검사 중 관계를 다시 조회하지 않는다.
+    권한 검증의 기준은 이 함수다. View의
+    `get_project_member_management_target()`은 입력 검증 전 조기 거절용이며,
+    잠금 획득 후 여기서 팀장 여부를 다시 확인한다.
+
+    Project를 먼저 잠근 뒤 대상 Member를 잠가 승인 시 정원 검사와 상태
+    변경이 같은 트랜잭션에서 수행되도록 한다. Member에는 잠긴 Project
+    인스턴스를 연결해 정원 검사 중 관계를 다시 조회하지 않는다.
 
     Args:
         actor: 멤버 상태 변경을 요청한 사용자.
@@ -454,7 +461,7 @@ def change_project_member_status(
     """
     with transaction.atomic():
         project = (
-            _visible_project_queryset()
+            Project.objects.exclude(status=Project.Status.DELETED)
             .select_for_update()
             .annotate(
                 actor_is_leader=Exists(
@@ -478,7 +485,6 @@ def change_project_member_status(
             next_status,
             description=description,
             update_description=update_description,
-            require_description=next_status == Member.Status.LEFT,
         )
         member.save(
             update_fields=(

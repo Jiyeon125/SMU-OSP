@@ -254,17 +254,23 @@ class Member(CommonModel):
     description = models.CharField(max_length=255, null=True, blank=True)
     joined_at = models.DateTimeField(null=True, blank=True)
 
-    def assert_can_transition_to(
+    _STATUSES_REQUIRING_DESCRIPTION = frozenset({Status.LEFT})
+
+    def assert_transition_structure(
         self,
-        next_status=None,
-        *,
-        description=None,
-        require_description=False,
+        next_status: str | None = None,
     ) -> str:
-        """상태 전이가 가능한지 확인하고 적용할 상태를 반환한다.
+        """그래프·팀장·정원 제약만 확인하고 적용할 상태를 반환한다.
+
+        Args:
+            next_status: 목표 상태. None이면 PENDING→CANCELED,
+                JOINED→LEFT로 해석한다.
+
+        Returns:
+            적용할 다음 상태 값.
 
         Raises:
-            ValidationError: 전이 불가, 팀장 보호, 사유 누락, 정원 초과.
+            ValidationError: 전이 불가, 팀장 보호, 정원 초과.
         """
         allowed_transitions = {
             self.Status.PENDING: {
@@ -289,11 +295,6 @@ class Member(CommonModel):
                 "프로젝트 팀장은 탈퇴하거나 내보낼 수 없습니다.",
                 code="leader_protected",
             )
-        if require_description and not (description or "").strip():
-            raise ValidationError(
-                "멤버를 내보내려면 사유를 입력해주세요.",
-                code="member_description_required",
-            )
         if (
             next_status == self.Status.JOINED
             and not self.project.has_available_member_slot()
@@ -304,18 +305,56 @@ class Member(CommonModel):
             )
         return next_status
 
+    def assert_can_transition_to(
+        self,
+        next_status: str | None = None,
+        *,
+        description: str | None = None,
+    ) -> str:
+        """상태 전이가 가능한지 확인하고 적용할 상태를 반환한다.
+
+        LEFT 전이는 사유가 비어 있으면 거부한다. 호출측에서 사유 검사를
+        끌 수 없다.
+
+        Args:
+            next_status: 목표 상태. None이면 PENDING→CANCELED,
+                JOINED→LEFT로 해석한다.
+            description: 전이 사유. LEFT일 때 필수이다.
+
+        Returns:
+            적용할 다음 상태 값.
+
+        Raises:
+            ValidationError: 전이 불가, 팀장 보호, 사유 누락, 정원 초과.
+        """
+        next_status = self.assert_transition_structure(next_status)
+        if (
+            next_status in self._STATUSES_REQUIRING_DESCRIPTION
+            and not (description or "").strip()
+        ):
+            raise ValidationError(
+                "멤버를 내보내려면 사유를 입력해주세요.",
+                code="member_description_required",
+            )
+        return next_status
+
     def transition_to(
         self,
-        next_status=None,
+        next_status: str | None = None,
         *,
-        description=None,
-        update_description=False,
-        require_description=False,
-    ):
+        description: str | None = None,
+        update_description: bool = False,
+    ) -> None:
+        """멤버 상태를 전이한다. 저장은 호출측에서 수행한다.
+
+        Args:
+            next_status: 목표 상태. None이면 기본 전이를 사용한다.
+            description: 전이 사유.
+            update_description: 참이면 description 필드를 갱신한다.
+        """
         next_status = self.assert_can_transition_to(
             next_status,
             description=description,
-            require_description=require_description,
         )
         self.status = next_status
         if next_status == self.Status.JOINED:
