@@ -33,7 +33,6 @@ from .selectors import (
     list_memberships_for_user,
     list_project_members,
     list_projects,
-    project_exists,
 )
 from .serializers import (
     ProjectCreateSerializer,
@@ -53,6 +52,7 @@ from .services import (
     create_project,
     cancel_or_leave_membership,
     create_membership_application,
+    get_membership_cancel_target,
     prepare_project_repository_update,
     update_project_repository,
 )
@@ -499,7 +499,20 @@ class ProjectMembers(APIView):
 
     @api_login_required
     def delete(self, request, pk):
-        if not project_exists(pk):
+        try:
+            get_membership_cancel_target(
+                actor=request.user,
+                project_id=pk,
+            )
+            serializer = ProjectMemberDescriptionSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            cancel_or_leave_membership(
+                actor=request.user,
+                project_id=pk,
+                description=serializer.validated_data.get("description"),
+                update_description="description" in serializer.validated_data,
+            )
+        except Project.DoesNotExist:
             return Response(
                 fail(
                     "PROJECT_NOT_FOUND",
@@ -507,25 +520,6 @@ class ProjectMembers(APIView):
                     status.HTTP_404_NOT_FOUND,
                 ),
                 status=status.HTTP_404_NOT_FOUND,
-            )
-
-        serializer = ProjectMemberDescriptionSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(
-                fail(
-                    "INVALID_MEMBER_INPUT",
-                    first_serializer_error(serializer.errors),
-                    status.HTTP_400_BAD_REQUEST,
-                ),
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        try:
-            cancel_or_leave_membership(
-                actor=request.user,
-                project_id=pk,
-                description=serializer.validated_data.get("description"),
-                update_description="description" in serializer.validated_data,
             )
         except Member.DoesNotExist:
             return Response(
@@ -536,23 +530,29 @@ class ProjectMembers(APIView):
                 ),
                 status=status.HTTP_404_NOT_FOUND,
             )
+        except DRFValidationError as error:
+            return Response(
+                fail(
+                    "INVALID_MEMBER_INPUT",
+                    first_serializer_error(error.detail),
+                    status.HTTP_400_BAD_REQUEST,
+                ),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         except ValidationError as error:
             response_status = (
                 "PERMISSION_DENIED"
                 if error.code == "leader_protected"
                 else "INVALID_MEMBER_STATUS"
             )
-            return Response(
-                fail(
-                    response_status,
-                    error.message,
-                    status.HTTP_403_FORBIDDEN
-                    if response_status == "PERMISSION_DENIED"
-                    else status.HTTP_400_BAD_REQUEST,
-                ),
-                status=status.HTTP_403_FORBIDDEN
+            http_status = (
+                status.HTTP_403_FORBIDDEN
                 if response_status == "PERMISSION_DENIED"
-                else status.HTTP_400_BAD_REQUEST,
+                else status.HTTP_400_BAD_REQUEST
+            )
+            return Response(
+                fail(response_status, error.message, http_status),
+                status=http_status,
             )
 
         return Response(success(None), status=status.HTTP_200_OK)

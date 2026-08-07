@@ -187,10 +187,6 @@ def get_project_detail(
     return project
 
 
-def project_exists(project_id: int) -> bool:
-    return Project.objects.filter(pk=project_id).exists()
-
-
 def list_memberships_for_user(
     *,
     user_id: int,

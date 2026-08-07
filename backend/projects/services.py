@@ -282,6 +282,21 @@ def create_project(
     )
 
 
+def _visible_project_queryset():
+    """삭제되지 않은 프로젝트 QuerySet."""
+    return Project.objects.exclude(status=Project.Status.DELETED)
+
+
+def _actor_leader_membership_queryset(*, actor_id: int):
+    """요청자가 JOINED 팀장인지 판정하는 Exists용 QuerySet."""
+    return Member.objects.filter(
+        project_id=OuterRef("pk"),
+        user_id=actor_id,
+        is_leader=True,
+        status=Member.Status.JOINED,
+    )
+
+
 def create_membership_application(
     *,
     actor: User,
@@ -292,10 +307,10 @@ def create_membership_application(
     과거 신청 이력 전체를 Project의 신청 가능 여부 검증에 사용한다.
 
     Raises:
-        Project.DoesNotExist: 프로젝트가 존재하지 않는 경우.
+        Project.DoesNotExist: 프로젝트가 없거나 삭제된 경우.
         ValidationError: 프로젝트에 참가 신청할 수 없는 경우.
     """
-    project = Project.objects.get(pk=project_id)
+    project = _visible_project_queryset().get(pk=project_id)
     memberships = list(
         Member.objects.filter(
             project=project,
@@ -310,6 +325,30 @@ def create_membership_application(
     )
 
 
+def get_membership_cancel_target(
+    *,
+    actor: User,
+    project_id: int,
+) -> Member:
+    """취소·탈퇴 입력 검증 전에 대상 멤버십과 전이 가능 여부를 확인한다.
+
+    Raises:
+        Project.DoesNotExist: 프로젝트가 없거나 삭제된 경우.
+        Member.DoesNotExist: 사용자의 멤버십 이력이 없는 경우.
+        ValidationError: 팀장 보호 또는 현재 상태에서 전이할 수 없는 경우.
+    """
+    _visible_project_queryset().get(pk=project_id)
+    membership = (
+        Member.objects.filter(project_id=project_id, user=actor)
+        .order_by("-is_leader", "-created_at", "-pk")
+        .first()
+    )
+    if membership is None:
+        raise Member.DoesNotExist
+    membership.assert_can_transition_to()
+    return membership
+
+
 def cancel_or_leave_membership(
     *,
     actor: User,
@@ -319,15 +358,19 @@ def cancel_or_leave_membership(
 ) -> None:
     """최신 참가 신청을 취소하거나 일반 팀원이 프로젝트에서 탈퇴한다.
 
-    팀장 멤버십을 우선 조회해 이후에 생성된 신청 이력이 있더라도 팀장
-    보호 규칙을 우회하지 못하게 한다. update_description이 참이면
-    description이 None인 경우도 저장하고, 거짓이면 기존 사유를 유지한다.
+    호출 전에 `get_membership_cancel_target()`으로 대상과 전이 가능
+    여부를 확인하는 것을 전제로 한다. 팀장 멤버십을 우선 조회해 이후에
+    생성된 신청 이력이 있더라도 팀장 보호 규칙을 우회하지 못하게 한다.
+    update_description이 참이면 description이 None인 경우도 저장하고,
+    거짓이면 기존 사유를 유지한다.
 
     Raises:
+        Project.DoesNotExist: 프로젝트가 없거나 삭제된 경우.
         Member.DoesNotExist: 사용자의 멤버십 이력이 없는 경우.
         ValidationError: 현재 멤버십 상태에서 전이할 수 없는 경우.
     """
     with transaction.atomic():
+        _visible_project_queryset().select_for_update().get(pk=project_id)
         membership = (
             Member.objects.select_for_update()
             .filter(project_id=project_id, user=actor)
@@ -351,6 +394,34 @@ def cancel_or_leave_membership(
         )
 
 
+def get_project_member_management_target(
+    *,
+    actor: User,
+    project_id: int,
+) -> Project:
+    """멤버 상태 변경 입력 검증 전에 프로젝트와 팀장 권한을 확인한다.
+
+    Raises:
+        Project.DoesNotExist: 프로젝트가 없거나 삭제된 경우.
+        ValidationError: 요청자가 팀장이 아닌 경우.
+    """
+    project = (
+        _visible_project_queryset()
+        .annotate(
+            actor_is_leader=Exists(
+                _actor_leader_membership_queryset(actor_id=actor.pk)
+            )
+        )
+        .get(pk=project_id)
+    )
+    if not project.actor_is_leader:
+        raise ValidationError(
+            "프로젝트 리더만 멤버 상태를 변경할 수 있습니다.",
+            code="leader_required",
+        )
+    return project
+
+
 def change_project_member_status(
     *,
     actor: User,
@@ -362,9 +433,11 @@ def change_project_member_status(
 ) -> None:
     """팀장이 프로젝트 멤버의 상태를 변경한다.
 
-    Project를 먼저 잠근 뒤 대상 Member를 잠가 승인 시 정원 검사와 상태
-    변경이 같은 트랜잭션에서 수행되도록 한다. Member에는 잠긴 Project
-    인스턴스를 연결해 정원 검사 중 관계를 다시 조회하지 않는다.
+    호출 전에 `get_project_member_management_target()`으로 대상과 팀장
+    권한을 확인하는 것을 전제로 한다. Project를 먼저 잠근 뒤 대상
+    Member를 잠가 승인 시 정원 검사와 상태 변경이 같은 트랜잭션에서
+    수행되도록 한다. Member에는 잠긴 Project 인스턴스를 연결해 정원
+    검사 중 관계를 다시 조회하지 않는다.
 
     Args:
         actor: 멤버 상태 변경을 요청한 사용자.
@@ -375,24 +448,22 @@ def change_project_member_status(
         update_description: description 필드 갱신 여부.
 
     Raises:
-        Project.DoesNotExist: 프로젝트가 존재하지 않는 경우.
+        Project.DoesNotExist: 프로젝트가 없거나 삭제된 경우.
         Member.DoesNotExist: 변경 가능한 일반 멤버가 존재하지 않는 경우.
         ValidationError: 팀장 권한이나 상태 전이 조건을 만족하지 않는 경우.
     """
-    leader_members = Member.objects.filter(
-        project=OuterRef("pk"),
-        user=actor,
-        is_leader=True,
-        status=Member.Status.JOINED,
-    )
-
     with transaction.atomic():
         project = (
-            Project.objects.select_for_update()
-            .annotate(is_leader=Exists(leader_members))
+            _visible_project_queryset()
+            .select_for_update()
+            .annotate(
+                actor_is_leader=Exists(
+                    _actor_leader_membership_queryset(actor_id=actor.pk)
+                )
+            )
             .get(pk=project_id)
         )
-        if not project.is_leader:
+        if not project.actor_is_leader:
             raise ValidationError(
                 "프로젝트 리더만 멤버 상태를 변경할 수 있습니다.",
                 code="leader_required",

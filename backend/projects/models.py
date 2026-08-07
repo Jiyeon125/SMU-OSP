@@ -254,14 +254,18 @@ class Member(CommonModel):
     description = models.CharField(max_length=255, null=True, blank=True)
     joined_at = models.DateTimeField(null=True, blank=True)
 
-    def transition_to(
+    def assert_can_transition_to(
         self,
         next_status=None,
         *,
         description=None,
-        update_description=False,
         require_description=False,
-    ):
+    ) -> str:
+        """상태 전이가 가능한지 확인하고 적용할 상태를 반환한다.
+
+        Raises:
+            ValidationError: 전이 불가, 팀장 보호, 사유 누락, 정원 초과.
+        """
         allowed_transitions = {
             self.Status.PENDING: {
                 self.Status.CANCELED,
@@ -298,7 +302,21 @@ class Member(CommonModel):
                 "프로젝트 정원이 가득 차 신청을 승인할 수 없습니다.",
                 code="project_capacity_reached",
             )
+        return next_status
 
+    def transition_to(
+        self,
+        next_status=None,
+        *,
+        description=None,
+        update_description=False,
+        require_description=False,
+    ):
+        next_status = self.assert_can_transition_to(
+            next_status,
+            description=description,
+            require_description=require_description,
+        )
         self.status = next_status
         if next_status == self.Status.JOINED:
             self.joined_at = timezone.now()

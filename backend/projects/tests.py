@@ -2527,6 +2527,33 @@ class ProjectApiTests(TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["status"], "PROJECT_NOT_FOUND")
 
+    def test_project_leader_invalid_cancel_payload_is_still_forbidden(self):
+        """팀장 탈퇴는 잘못된 body보다 403이 먼저다."""
+        self.client.force_login(self.user)
+
+        response = self.client.delete(
+            f"/api/v1/projects/{self.project.pk}/members",
+            data={"description": "x" * 256},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["status"], "PERMISSION_DENIED")
+        self.member.refresh_from_db()
+        self.assertEqual(self.member.status, Member.Status.JOINED)
+
+    def test_project_membership_cancel_hides_deleted_project(self):
+        self.project.status = Project.Status.DELETED
+        self.project.save(update_fields=("status", "updated_at"))
+        self.client.force_login(self.user)
+
+        response = self.client.delete(
+            f"/api/v1/projects/{self.project.pk}/members"
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["status"], "PROJECT_NOT_FOUND")
+
     def test_project_membership_cancel_rejects_user_without_membership(self):
         other_user = get_user_model().objects.create_user(
             username="non-member",
@@ -2862,6 +2889,71 @@ class ProjectApiTests(TestCase):
             f"/api/v1/projects/999999/members/{self.member.pk}",
             data={"status": Member.Status.JOINED},
             content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["status"], "PROJECT_NOT_FOUND")
+
+    def test_non_leader_invalid_member_update_payload_is_still_forbidden(self):
+        """비팀장 멤버 상태 변경은 잘못된 body보다 403이 먼저다."""
+        teammate = get_user_model().objects.create_user(
+            username="member-update-nonleader",
+            password="password",
+            github_email="member-update-nonleader@sookmyung.ac.kr",
+            name="비팀장",
+            student_id=236,
+            major="컴퓨터과학",
+        )
+        Member.objects.create(
+            project=self.project,
+            user=teammate,
+            status=Member.Status.JOINED,
+        )
+        pending = Member.objects.create(
+            project=self.project,
+            user=teammate,
+            status=Member.Status.PENDING,
+        )
+        self.client.force_login(teammate)
+
+        response = self.client.put(
+            f"/api/v1/projects/{self.project.pk}/members/{pending.pk}",
+            data={"status": "NOT_A_STATUS"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["status"], "PERMISSION_DENIED")
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, Member.Status.PENDING)
+
+    def test_project_member_update_invalid_project_beats_invalid_payload(self):
+        self.client.force_login(self.user)
+
+        response = self.client.put(
+            f"/api/v1/projects/999999/members/{self.member.pk}",
+            data={"status": "NOT_A_STATUS"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["status"], "PROJECT_NOT_FOUND")
+
+    def test_project_membership_application_hides_deleted_project(self):
+        self.project.status = Project.Status.DELETED
+        self.project.save(update_fields=("status", "updated_at"))
+        applicant = get_user_model().objects.create_user(
+            username="deleted-project-applicant",
+            password="password",
+            github_email="deleted-project-applicant@sookmyung.ac.kr",
+            name="삭제 프로젝트 신청자",
+            student_id=237,
+            major="컴퓨터과학",
+        )
+        self.client.force_login(applicant)
+
+        response = self.client.post(
+            f"/api/v1/projects/{self.project.pk}/members"
         )
 
         self.assertEqual(response.status_code, 404)
