@@ -1081,28 +1081,55 @@ class ProjectApiTests(TestCase):
         self.assertTrue(Repository.objects.filter(project=self.project).exists())
 
     def test_project_leader_cannot_change_repository_connection(self):
+        """연결된 Repository URL을 바꿔 보내도 연결은 유지되고 수정은 된다."""
         self.client.force_login(self.user)
 
         response = self.client.put(
             f"/api/v1/projects/{self.project.pk}",
             data=self.project_update_payload(
-                name="롤백되어야 하는 이름",
+                name="연결된 Repository 유지",
                 repositoryUrl="https://github.com/example/other-project",
             ),
             content_type="application/json",
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(
-            response.json()["detail"]["message"],
-            "이미 등록된 Repository는 변경하거나 연결 해제할 수 없습니다.",
-        )
+        self.assertEqual(response.status_code, 200)
         self.project.refresh_from_db()
         self.repository.refresh_from_db()
-        self.assertEqual(self.project.name, "SOSP")
+        self.assertEqual(self.project.name, "연결된 Repository 유지")
         self.assertEqual(
             self.repository.html_url,
             "https://github.com/Jiyeon125/SMU-OSP",
+        )
+        self.assertEqual(self.repository.github_id, 101)
+
+    def test_project_update_ignores_stale_linked_repository_html_url(self):
+        """refresh로 html_url이 바뀐 뒤에도 예전 URL로 수정할 수 있다."""
+        self.repository.html_url = (
+            "https://github.com/Jiyeon125/SMU-OSP-renamed"
+        )
+        self.repository.full_name = "Jiyeon125/SMU-OSP-renamed"
+        self.repository.save(
+            update_fields=("html_url", "full_name", "updated_at")
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.put(
+            f"/api/v1/projects/{self.project.pk}",
+            data=self.project_update_payload(
+                name="stale html_url 수정",
+                repositoryUrl="https://github.com/Jiyeon125/SMU-OSP",
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.project.refresh_from_db()
+        self.repository.refresh_from_db()
+        self.assertEqual(self.project.name, "stale html_url 수정")
+        self.assertEqual(
+            self.repository.html_url,
+            "https://github.com/Jiyeon125/SMU-OSP-renamed",
         )
 
     def test_non_leader_cannot_update_project(self):
@@ -1364,6 +1391,30 @@ class ProjectApiTests(TestCase):
             response.json()["detail"]["message"],
             "이미 등록된 프로젝트명입니다.",
         )
+
+    def test_project_update_maps_name_integrity_error_to_400(self):
+        """Serializer를 지나친 이름 충돌도 생성과 같이 400이다."""
+        self.client.force_login(self.user)
+
+        with patch(
+            "projects.services.Project.save",
+            side_effect=IntegrityError,
+        ):
+            response = self.client.put(
+                f"/api/v1/projects/{self.project.pk}",
+                data=self.project_update_payload(name="레이스 이름"),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        body = response.json()
+        self.assertEqual(body["status"], "INVALID_PROJECT_INPUT")
+        self.assertEqual(
+            body["detail"]["message"],
+            "이미 등록된 프로젝트명입니다.",
+        )
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.name, "SOSP")
 
     def test_project_detail_not_found(self):
         response = self.client.get("/api/v1/projects/999")

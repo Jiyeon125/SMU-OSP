@@ -289,6 +289,15 @@ class ProjectDetail(APIView):
                 ),
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        except ProjectCreationError as error:
+            return Response(
+                fail(
+                    "INVALID_PROJECT_INPUT",
+                    str(error),
+                    status.HTTP_400_BAD_REQUEST,
+                ),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         except RepositoryRegistrationError as error:
             http_status = (
                 status.HTTP_500_INTERNAL_SERVER_ERROR

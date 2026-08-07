@@ -108,14 +108,26 @@ def prepare_repository_registration(
     return data
 
 
+def _assert_linked_repository_immutable(
+    repository_url: str | None,
+) -> None:
+    """이미 연결된 Repository는 연결 해제만 거절하고 URL은 무시한다.
+
+    FE는 상세 조회의 htmlUrl을 그대로 다시 보낸다. refresh로 html_url이
+    바뀌어도 finish/수정이 실패하지 않도록, 비어 있지 않은 URL은 비교하지
+    않는다. 연결 자체는 update 경로에서 절대 바꾸지 않는다.
+    """
+    if not repository_url:
+        raise ValueError(REPOSITORY_CHANGE_NOT_ALLOWED_MESSAGE)
+
+
 def prepare_project_repository_update(
     project: Project,
     repository_url: str | None,
 ) -> GitHubRepositoryIdentity | None:
     repository = getattr(project, "repository", None)
     if repository is not None:
-        if repository_url != repository.html_url:
-            raise ValueError(REPOSITORY_CHANGE_NOT_ALLOWED_MESSAGE)
+        _assert_linked_repository_immutable(repository_url)
         return None
     if not repository_url:
         return None
@@ -131,8 +143,7 @@ def update_project_repository(
 ) -> None:
     repository = getattr(project, "repository", None)
     if repository:
-        if repository_url != repository.html_url:
-            raise ValueError(REPOSITORY_CHANGE_NOT_ALLOWED_MESSAGE)
+        _assert_linked_repository_immutable(repository_url)
         if (
             previous_project_status == project.Status.INACTIVE
             and project.status == project.Status.ACTIVE
@@ -344,8 +355,9 @@ def update_project(
     Raises:
         Project.DoesNotExist: 잠금 재조회 시 프로젝트가 사라진 경우.
         PermissionDenied: 요청자가 프로젝트 팀장이 아닌 경우.
+        ProjectCreationError: 프로젝트명 unique 충돌이 난 경우.
         RepositoryRegistrationError: Repository 등록에 실패한 경우.
-        ValueError: 상태 전이 또는 Repository 변경이 허용되지 않는 경우.
+        ValueError: 상태 전이 또는 Repository 연결 해제가 허용되지 않는 경우.
     """
     if not actor.is_authenticated:
         raise PermissionDenied
@@ -374,7 +386,13 @@ def update_project(
         locked_project.demo_url = demo_url
         locked_project.presentation_url = presentation_url
         locked_project.set_status(status)
-        locked_project.save()
+        try:
+            locked_project.save()
+        except IntegrityError as error:
+            # 생성 경로와 같이 이름 unique 충돌은 입력 오류로 취급한다.
+            raise ProjectCreationError(
+                "이미 등록된 프로젝트명입니다."
+            ) from error
         locked_project.languages.set(languages)
         update_project_repository(
             locked_project,
