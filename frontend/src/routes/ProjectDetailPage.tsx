@@ -12,6 +12,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import ProjectLeaveDialog from "../components/ProjectLeaveDialog";
 import ProjectMemberManagementDialog from "../components/ProjectMemberManagementDialog";
+import ProjectNotFoundPanel from "../components/ProjectNotFoundPanel";
+import StatusMessagePanel from "../components/StatusMessagePanel";
 import { Button } from "../components/ui/button";
 import {
   MenuContent,
@@ -570,6 +572,7 @@ export default function ProjectDetailPage() {
         setProjectActionMessage(response.detail.message);
         return;
       }
+      navigate("/projects");
       queryClient.removeQueries({
         queryKey: ["project", id],
         exact: true,
@@ -580,11 +583,10 @@ export default function ProjectDetailPage() {
           queryKey: ["project-application-history"],
         }),
       ]);
-      navigate("/projects");
     },
   });
 
-  if (projectQuery.isLoading) {
+  if (projectQuery.isLoading || deleteProjectMutation.isSuccess) {
     return (
       <Box display={"flex"} justifyContent={"center"} p={10}>
         <Spinner />
@@ -594,30 +596,28 @@ export default function ProjectDetailPage() {
 
   const resp = projectQuery.data;
   if (!resp || resp.status !== "SUCCESS") {
+    if (resp?.status === "PROJECT_NOT_FOUND") {
+      return <ProjectNotFoundPanel />;
+    }
     return (
-      <Box px={{ base: 4, md: 10 }} py={6} maxW={"800px"} mx={"auto"}>
-        <Box
-          p={6}
-          borderWidth={1}
-          borderColor={"smu.orange"}
-          bg={"#fff8ec"}
-          borderRadius={"lg"}
-        >
-          <Text fontWeight={"bold"} color={"smu.orange"}>
-            [{resp?.status || "UNKNOWN"}]
-          </Text>
-          <Text>{resp?.detail.message || "프로젝트를 불러올 수 없습니다."}</Text>
-          <Box mt={4}>
-            <RouterLink to={"/projects"}>
-              <Button variant={"outline"}>목록으로</Button>
-            </RouterLink>
-          </Box>
-        </Box>
-      </Box>
+      <StatusMessagePanel
+        page
+        title="프로젝트를 불러올 수 없습니다."
+        description={
+          resp?.detail.message || "잠시 후 다시 시도해주세요."
+        }
+      >
+        <RouterLink to={"/projects"}>
+          <Button variant={"outline"}>목록으로</Button>
+        </RouterLink>
+      </StatusMessagePanel>
     );
   }
 
   const project = resp.data;
+  const repositoryLanguages =
+    project.repository?.languages ??
+    (project.repository?.language ? [project.repository.language] : []);
   const applicationHistory =
     applicationHistoryQuery.data?.status === "SUCCESS"
       ? applicationHistoryQuery.data.data.filter(
@@ -763,49 +763,31 @@ export default function ProjectDetailPage() {
         </HStack>
 
         {projectActionMessage && (
-          <Box
+          <StatusMessagePanel
             role={
               finishProjectMutation.data?.status === "SUCCESS"
                 ? "status"
                 : "alert"
             }
-            p={3}
-            borderWidth={1}
-            borderColor={
-              finishProjectMutation.data?.status === "SUCCESS"
-                ? "smu.lightBlue"
-                : "smu.orange"
-            }
-            borderRadius="md"
-            bg="white"
-          >
-            <HStack justifyContent="space-between" alignItems="center" gap={3}>
-              <Text fontSize="sm">{projectActionMessage}</Text>
+            description={projectActionMessage}
+            actions={
               <MessageCloseButton
                 onClick={() => setProjectActionMessage("")}
               />
-            </HStack>
-          </Box>
+            }
+          />
         )}
 
         {leaveMessage && (
-          <Box
-            role={leaveMutation.data?.status === "SUCCESS" ? "status" : "alert"}
-            p={3}
-            borderWidth={1}
-            borderColor={
-              leaveMutation.data?.status === "SUCCESS"
-                ? "smu.lightBlue"
-                : "smu.orange"
+          <StatusMessagePanel
+            role={
+              leaveMutation.data?.status === "SUCCESS" ? "status" : "alert"
             }
-            borderRadius="md"
-            bg="white"
-          >
-            <HStack justifyContent="space-between" alignItems="center" gap={3}>
-              <Text fontSize="sm">{leaveMessage}</Text>
+            description={leaveMessage}
+            actions={
               <MessageCloseButton onClick={() => setLeaveMessage("")} />
-            </HStack>
-          </Box>
+            }
+          />
         )}
 
         <ProjectLeaveDialog
@@ -843,26 +825,16 @@ export default function ProjectDetailPage() {
         />
 
         {(applicationMessage || latestApplication?.status === "PENDING") && (
-          <Box
+          <StatusMessagePanel
             role={
               applicationMessage && applicationMessageFailed
                 ? "alert"
                 : "status"
             }
-            p={3}
-            borderWidth={1}
-            borderColor={
-              applicationMessage && applicationMessageFailed
-                ? "smu.orange"
-                : "smu.lightBlue"
+            description={
+              applicationMessage || "참가 신청 승인 대기 중입니다."
             }
-            borderRadius={"md"}
-            bg={"white"}
-          >
-            <HStack justifyContent="space-between" alignItems="center" gap={3}>
-              <Text fontSize={"sm"}>
-                {applicationMessage || "참가 신청 승인 대기 중입니다."}
-              </Text>
+            actions={
               <HStack flexShrink={0}>
                 {latestApplication?.status === "PENDING" && (
                   <Button
@@ -883,8 +855,8 @@ export default function ProjectDetailPage() {
                   />
                 )}
               </HStack>
-            </HStack>
-          </Box>
+            }
+          />
         )}
 
         <Box
@@ -1027,36 +999,24 @@ export default function ProjectDetailPage() {
             </HStack>
           </HStack>
           {repositoryActionMessage && (
-            <Box
-              role={repositoryActionFailed ? "alert" : "status"}
-              p={3}
-              mb={3}
-              borderWidth={1}
-              borderColor={
-                repositoryActionFailed ? "smu.orange" : "smu.lightBlue"
-              }
-              borderRadius="md"
-              bg="white"
-            >
-              <HStack justifyContent="space-between" alignItems="center" gap={3}>
-                <Text fontSize="sm">{repositoryActionMessage}</Text>
-                <MessageCloseButton
-                  onClick={() => setRepositoryActionMessage("")}
-                />
-              </HStack>
+            <Box mb={3}>
+              <StatusMessagePanel
+                role={repositoryActionFailed ? "alert" : "status"}
+                description={repositoryActionMessage}
+                actions={
+                  <MessageCloseButton
+                    onClick={() => setRepositoryActionMessage("")}
+                  />
+                }
+              />
             </Box>
           )}
           {isRepositoryCollectionPending && (
-            <Box
-              role="status"
-              p={3}
-              mb={3}
-              borderWidth={1}
-              borderColor="smu.lightBlue"
-              borderRadius="md"
-              bg="#f4f9fd"
-            >
-              <Text fontSize="sm">Repository 정보 수집 대기 중입니다.</Text>
+            <Box mb={3}>
+              <StatusMessagePanel
+                role="status"
+                description="Repository 정보 수집 대기 중입니다."
+              />
             </Box>
           )}
           {repositoryName && repositoryUrl ? (
@@ -1095,6 +1055,15 @@ export default function ProjectDetailPage() {
                       value={formatDateTimeKST(project.repository.fetchedAt)}
                     />
                   </SimpleGrid>
+                )}
+                {repositoryLanguages.length > 0 && (
+                  <HStack flexWrap="wrap" gap={1} mb={3}>
+                    {repositoryLanguages.map((language) => (
+                      <Pill key={language} bg="smu.lightBlue" color="white">
+                        {language}
+                      </Pill>
+                    ))}
+                  </HStack>
                 )}
                 <ExternalTextLink href={repositoryUrl}>
                   Repository 열기

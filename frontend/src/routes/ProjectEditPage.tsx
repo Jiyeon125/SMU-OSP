@@ -13,20 +13,53 @@ import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import LogInButton from "../components/LogInButton";
 import ProjectLanguageSelect from "../components/ProjectLanguageSelect";
+import ProjectNotFoundPanel from "../components/ProjectNotFoundPanel";
+import StatusMessagePanel from "../components/StatusMessagePanel";
 import { Button } from "../components/ui/button";
 import useUser from "../lib/useUser";
 import { getProject, updateProject } from "../services/projectService";
-import {
-  type ProjectUpdateInput,
-} from "../types/project";
+import { type ProjectUpdateInput } from "../types/project";
 
 const MAX_PROJECT_NAME_LENGTH = 100;
 const MAX_PROJECT_DESCRIPTION_LENGTH = 2000;
 const MAX_PROJECT_URL_LENGTH = 500;
 
+type FieldErrors = {
+  name?: string;
+  description?: string;
+  repositoryUrl?: string;
+};
+
 function optionalUrl(value: string) {
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
+}
+
+function Field({
+  label,
+  required,
+  error,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  error?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Box>
+      <Text fontSize={"xs"} color={"smu.darkGray"} mb={1}>
+        {label}
+        {required ? " *" : ""}
+      </Text>
+      {children}
+      {error ? (
+        <Text mt={1} fontSize={"xs"} color={"smu.orange"} fontWeight={"bold"}>
+          {error}
+        </Text>
+      ) : null}
+    </Box>
+  );
 }
 
 export default function ProjectEditPage() {
@@ -51,7 +84,8 @@ export default function ProjectEditPage() {
   const [presentationUrl, setPresentationUrl] = useState("");
   const [techStack, setTechStack] = useState<string[]>([]);
   const [initializedProjectId, setInitializedProjectId] = useState<number>();
-  const [errorMessage, setErrorMessage] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [formError, setFormError] = useState("");
 
   const projectQuery = useQuery({
     queryKey: ["project", id],
@@ -78,7 +112,8 @@ export default function ProjectEditPage() {
     setPresentationUrl(project.presentationUrl || "");
     setTechStack(project.techStack);
     if (!project.repository && retryRepositoryError) {
-      setErrorMessage(retryRepositoryError);
+      setFieldErrors({ repositoryUrl: retryRepositoryError });
+      setFormError("");
     }
     setInitializedProjectId(project.id);
   }, [
@@ -92,7 +127,20 @@ export default function ProjectEditPage() {
     mutationFn: (input: ProjectUpdateInput) => updateProject(id, input),
     onSuccess: (response) => {
       if (response.status !== "SUCCESS") {
-        setErrorMessage(response.detail.message);
+        const message = response.detail.message;
+        if (
+          response.status === "INVALID_GITHUB_URL" ||
+          response.status === "GITHUB_REPOSITORY_NOT_FOUND" ||
+          response.status === "PRIVATE_REPOSITORY" ||
+          response.status === "GITHUB_API_FAILED" ||
+          response.status === "GITHUB_RATE_LIMIT_EXCEEDED"
+        ) {
+          setFieldErrors({ repositoryUrl: message });
+          setFormError("");
+          return;
+        }
+        setFieldErrors({});
+        setFormError(message);
         return;
       }
 
@@ -112,59 +160,77 @@ export default function ProjectEditPage() {
 
   if (!isLoggedIn) {
     return (
-      <MessageCard title="로그인이 필요합니다.">
-        <Text color={"smu.darkGray"}>
-          프로젝트를 수정하려면 GitHub 로그인이 필요합니다.
-        </Text>
-        <HStack justifyContent={"flex-end"} mt={4}>
-          <Button variant={"outline"} onClick={() => navigate(`/projects/${id}`)}>
+      <StatusMessagePanel
+        page
+        title="로그인이 필요합니다."
+        description="프로젝트를 수정하려면 GitHub 로그인이 필요합니다."
+      >
+        <HStack>
+          <Button
+            variant={"outline"}
+            onClick={() => navigate(`/projects/${id}`)}
+          >
             돌아가기
           </Button>
           <LogInButton bg={"smu.blue"} label="GitHub 로그인" />
         </HStack>
-      </MessageCard>
+      </StatusMessagePanel>
     );
+  }
+
+  if (projectResponse?.status === "PROJECT_NOT_FOUND") {
+    return <ProjectNotFoundPanel />;
   }
 
   if (!projectResponse || projectResponse.status !== "SUCCESS") {
     return (
-      <MessageCard title="프로젝트를 불러올 수 없습니다.">
-        <Text color={"smu.darkGray"}>
-          {projectResponse?.detail.message || "잠시 후 다시 시도해주세요."}
-        </Text>
-      </MessageCard>
+      <StatusMessagePanel
+        page
+        title="프로젝트를 불러올 수 없습니다."
+        description={
+          projectResponse?.detail.message || "잠시 후 다시 시도해주세요."
+        }
+      />
     );
   }
 
   const project = projectResponse.data;
   if (!project.canEdit) {
     return (
-      <MessageCard title="수정 권한이 없습니다.">
-        <Text color={"smu.darkGray"}>
-          프로젝트 팀장만 프로젝트 정보를 수정할 수 있습니다.
-        </Text>
-        <HStack justifyContent={"flex-end"} mt={4}>
-          <Button variant={"outline"} onClick={() => navigate(`/projects/${id}`)}>
-            돌아가기
-          </Button>
-        </HStack>
-      </MessageCard>
+      <StatusMessagePanel
+        page
+        title="수정 권한이 없습니다."
+        description="프로젝트 팀장만 프로젝트 정보를 수정할 수 있습니다."
+      >
+        <Button
+          variant={"outline"}
+          onClick={() => navigate(`/projects/${id}`)}
+        >
+          돌아가기
+        </Button>
+      </StatusMessagePanel>
     );
   }
   const hasRepository = !!project.repository;
 
   const handleSubmit = () => {
     if (mutation.isPending) return;
+
+    const nextFieldErrors: FieldErrors = {};
     if (!name.trim()) {
-      setErrorMessage("프로젝트명을 입력해주세요.");
-      return;
+      nextFieldErrors.name = "프로젝트명을 입력해주세요.";
     }
     if (!description.trim()) {
-      setErrorMessage("프로젝트 설명을 입력해주세요.");
+      nextFieldErrors.description = "프로젝트 설명을 입력해주세요.";
+    }
+    if (Object.keys(nextFieldErrors).length > 0) {
+      setFieldErrors(nextFieldErrors);
+      setFormError("");
       return;
     }
 
-    setErrorMessage("");
+    setFieldErrors({});
+    setFormError("");
     mutation.mutate({
       name: name.trim(),
       description: description.trim(),
@@ -188,7 +254,10 @@ export default function ProjectEditPage() {
               프로젝트 정보와 결과물 링크를 수정합니다.
             </Text>
           </Box>
-          <Button variant={"outline"} onClick={() => navigate(`/projects/${id}`)}>
+          <Button
+            variant={"outline"}
+            onClick={() => navigate(`/projects/${id}`)}
+          >
             돌아가기
           </Button>
         </HStack>
@@ -201,32 +270,63 @@ export default function ProjectEditPage() {
           bg={"white"}
         >
           <VStack alignItems={"stretch"} gap={5}>
-            <Field label="프로젝트명" required>
+            <Field label="프로젝트명" required error={fieldErrors.name}>
               <Input
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  if (fieldErrors.name) {
+                    setFieldErrors((prev) => ({ ...prev, name: undefined }));
+                  }
+                }}
                 maxLength={MAX_PROJECT_NAME_LENGTH}
                 disabled={mutation.isPending}
+                aria-invalid={Boolean(fieldErrors.name)}
               />
             </Field>
 
-            <Field label="프로젝트 설명" required>
+            <Field
+              label="프로젝트 설명"
+              required
+              error={fieldErrors.description}
+            >
               <Textarea
                 value={description}
-                onChange={(e) => setDescription(e.target.value)}
+                onChange={(e) => {
+                  setDescription(e.target.value);
+                  if (fieldErrors.description) {
+                    setFieldErrors((prev) => ({
+                      ...prev,
+                      description: undefined,
+                    }));
+                  }
+                }}
                 minH={"120px"}
                 maxLength={MAX_PROJECT_DESCRIPTION_LENGTH}
                 disabled={mutation.isPending}
+                aria-invalid={Boolean(fieldErrors.description)}
               />
             </Field>
 
-            <Field label="GitHub Repository URL">
+            <Field
+              label="GitHub Repository URL"
+              error={fieldErrors.repositoryUrl}
+            >
               <Input
                 value={repositoryUrl}
-                onChange={(e) => setRepositoryUrl(e.target.value)}
+                onChange={(e) => {
+                  setRepositoryUrl(e.target.value);
+                  if (fieldErrors.repositoryUrl) {
+                    setFieldErrors((prev) => ({
+                      ...prev,
+                      repositoryUrl: undefined,
+                    }));
+                  }
+                }}
                 placeholder="https://github.com/owner/repository"
                 maxLength={MAX_PROJECT_URL_LENGTH}
                 disabled={mutation.isPending || hasRepository}
+                aria-invalid={Boolean(fieldErrors.repositoryUrl)}
               />
               {hasRepository && (
                 <Text mt={1} fontSize={"xs"} color={"smu.darkGray"}>
@@ -264,18 +364,11 @@ export default function ProjectEditPage() {
               </Field>
             </SimpleGrid>
 
-            {errorMessage && (
-              <Box
-                p={3}
-                borderWidth={1}
-                borderColor={"smu.orange"}
-                borderRadius={"md"}
-                bg={"#fff8ec"}
-              >
-                <Text color={"smu.orange"} fontSize={"sm"} fontWeight={"bold"}>
-                  {errorMessage}
-                </Text>
-              </Box>
+            {formError && (
+              <StatusMessagePanel
+                title="요청을 처리하지 못했습니다."
+                description={formError}
+              />
             )}
 
             <HStack justifyContent={"flex-end"}>
@@ -297,51 +390,6 @@ export default function ProjectEditPage() {
           </VStack>
         </Box>
       </VStack>
-    </Box>
-  );
-}
-
-function Field({
-  label,
-  required,
-  children,
-}: {
-  label: string;
-  required?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <Box>
-      <Text fontSize={"xs"} color={"smu.darkGray"} mb={1}>
-        {label}
-        {required ? " *" : ""}
-      </Text>
-      {children}
-    </Box>
-  );
-}
-
-function MessageCard({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <Box px={{ base: 4, md: 10 }} py={6} maxW={"720px"} mx={"auto"}>
-      <Box
-        p={6}
-        borderWidth={1}
-        borderColor={"smu.gray"}
-        borderRadius={"lg"}
-        bg={"white"}
-      >
-        <Text fontSize={"xl"} fontWeight={"bold"} color={"smu.blue"} mb={2}>
-          {title}
-        </Text>
-        {children}
-      </Box>
     </Box>
   );
 }
