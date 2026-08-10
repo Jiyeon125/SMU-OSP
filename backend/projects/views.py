@@ -10,18 +10,26 @@ from rest_framework.views import APIView
 
 from common.authentication import api_login_required
 from common.responses import fail, success
+
 from .forms import ProjectListQueryForm, ProjectMemberQueryForm
 from .models import (
     Member,
     Project,
     ProjectLanguage,
 )
+from .selectors import (
+    get_joined_project_member,
+    get_project_detail,
+    list_memberships_for_user,
+    list_project_members,
+    list_projects,
+)
 from .serializers import (
     ProjectCreateSerializer,
     ProjectDetailSerializer,
     ProjectMemberDescriptionSerializer,
-    ProjectMembershipHistorySerializer,
     ProjectMemberSerializer,
+    ProjectMembershipHistorySerializer,
     ProjectMemberUpdateSerializer,
     ProjectSerializer,
     ProjectUpdateSerializer,
@@ -33,13 +41,6 @@ from .services import (
     get_project_update_target,
     mark_project_deleted,
     update_project,
-)
-from .selectors import (
-    get_joined_project_member,
-    get_project_detail,
-    list_memberships_for_user,
-    list_project_members,
-    list_projects,
 )
 
 PROJECT_NOT_FOUND_MESSAGE = (
@@ -76,6 +77,16 @@ def pagination_detail(
     limit: int,
     count: int,
 ) -> dict[str, dict[str, int | bool]]:
+    """페이지 범위와 전체 결과 수로 API pagination 정보를 만든다.
+
+    Args:
+        start: 현재 페이지가 시작하는 결과 위치.
+        limit: 한 페이지에 반환하는 최대 결과 수.
+        count: 필터가 적용된 전체 결과 수.
+
+    Returns:
+        현재·전체 페이지와 이전·다음 페이지 존재 여부.
+    """
     total_pages = (count + limit - 1) // limit if count else 1
     current_page = (start // limit) + 1
 
@@ -629,7 +640,15 @@ class ProjectMemberDetail(APIView):
         return Response(success(None), status=status.HTTP_200_OK)
 
 
-def first_serializer_error(errors):
+def first_serializer_error(errors: object) -> str:
+    """중첩된 Serializer 오류에서 첫 사용자 메시지를 반환한다.
+
+    Args:
+        errors: Serializer가 반환한 오류 상세 구조.
+
+    Returns:
+        첫 번째 오류 문자열 또는 기본 입력 오류 메시지.
+    """
     if isinstance(errors, dict):
         first_value = next(iter(errors.values()), None)
         if isinstance(first_value, list) and first_value:

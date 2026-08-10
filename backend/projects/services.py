@@ -36,6 +36,12 @@ REPOSITORY_SAVE_FAILED_MESSAGE = (
 
 
 class RepositoryRegistrationError(ValueError):
+    """Repository 등록 과정에서 발생한 사용자 응답용 오류를 나타낸다.
+
+    Attributes:
+        code: API 응답에 사용할 오류 코드.
+    """
+
     def __init__(self, code: str, message: str):
         self.code = code
         super().__init__(message)
@@ -112,6 +118,18 @@ def _registration_error(
 def prepare_repository_registration(
     repository_url: str,
 ) -> GitHubRepositoryIdentity:
+    """Repository URL을 검증하고 GitHub 식별 정보를 조회한다.
+
+    Args:
+        repository_url: 등록할 공개 GitHub Repository URL.
+
+    Returns:
+        GitHub API에서 조회한 Repository 식별 정보.
+
+    Raises:
+        RepositoryRegistrationError: URL이 유효하지 않거나 이미 등록됐거나
+            GitHub 조회가 실패한 경우.
+    """
     try:
         full_name = parse_repository_url(repository_url)
     except GitHubClientError as error:
@@ -146,6 +164,20 @@ def prepare_project_repository_update(
     project: Project,
     repository_url: str | None,
 ) -> GitHubRepositoryIdentity | None:
+    """프로젝트 수정 전에 Repository 변경 가능 여부와 등록 정보를 확인한다.
+
+    Args:
+        project: 수정할 프로젝트.
+        repository_url: 수정 요청에 포함된 Repository URL.
+
+    Returns:
+        새 Repository 등록에 필요한 GitHub 식별 정보. 등록하지 않으면 None.
+
+    Raises:
+        ValueError: 기존 Repository를 연결 해제하려는 경우.
+        RepositoryRegistrationError: 신규 Repository 검증이나 조회가 실패한
+            경우.
+    """
     repository = getattr(project, "repository", None)
     if repository is not None:
         _assert_linked_repository_immutable(repository_url)
@@ -162,6 +194,19 @@ def update_project_repository(
     previous_project_status: str | None = None,
     repository_data: GitHubRepositoryIdentity | None = None,
 ) -> None:
+    """프로젝트 상태에 맞춰 Repository 연결 또는 갱신 예약을 처리한다.
+
+    Args:
+        project: Repository 연결 상태를 반영할 프로젝트.
+        repository_url: 수정 요청에 포함된 Repository URL.
+        previous_project_status: 수정 전 프로젝트 상태.
+        repository_data: 트랜잭션 밖에서 미리 조회한 GitHub 식별 정보.
+
+    Raises:
+        ValueError: 기존 Repository를 연결 해제하려는 경우.
+        RepositoryRegistrationError: Repository가 중복되거나 저장이 실패한
+            경우.
+    """
     repository = getattr(project, "repository", None)
     if repository:
         _assert_linked_repository_immutable(repository_url)

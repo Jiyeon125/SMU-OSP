@@ -13,6 +13,11 @@ from common.models import CommonModel
 
 
 def get_default_max_members():
+    """설정에 지정된 프로젝트 기본 정원을 반환한다.
+
+    Returns:
+        프로젝트 생성 시 사용할 기본 최대 인원.
+    """
     return settings.PROJECT_DEFAULT_MAX_MEMBERS
 
 
@@ -275,6 +280,7 @@ class Project(CommonModel):
             for (date, has_code_changed), expected_date in zip(
                 snapshots,
                 expected_dates,
+                strict=True,
             )
         ):
             return False
