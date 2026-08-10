@@ -337,6 +337,9 @@ class Member(CommonModel):
             next_status: 목표 상태. None이면 기본 전이를 사용한다.
             description: 전이 사유.
             update_description: 참이면 description 필드를 갱신한다.
+
+        Raises:
+            ValidationError: 상태 전이 규칙을 만족하지 않는 경우.
         """
         next_status = self.assert_transition_structure(next_status)
         self.status = next_status

@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, transaction
-from django.db.models import Exists, OuterRef
+from django.db.models import Exists, OuterRef, QuerySet
 
 from users.models import User
 
@@ -282,8 +282,15 @@ def create_project(
     )
 
 
-def _actor_leader_membership_queryset(*, actor_id: int):
-    """요청자가 JOINED 팀장인지 판정하는 Exists용 QuerySet."""
+def _actor_leader_membership_queryset(*, actor_id: int) -> QuerySet[Member]:
+    """요청자가 JOINED 팀장인지 판정하는 Exists용 QuerySet을 만든다.
+
+    Args:
+        actor_id: 팀장 여부를 확인할 사용자 ID.
+
+    Returns:
+        바깥 Project 행과 연결된 JOINED 팀장 멤버십 QuerySet.
+    """
     return Member.objects.filter(
         project_id=OuterRef("pk"),
         user_id=actor_id,
@@ -298,7 +305,19 @@ def _get_visible_project_for_actor(
     actor: User,
     for_update: bool = False,
 ) -> Project:
-    """삭제되지 않은 프로젝트에 요청자 팀장 여부를 붙여 조회한다."""
+    """삭제되지 않은 프로젝트에 요청자 팀장 여부를 붙여 조회한다.
+
+    Args:
+        project_id: 조회할 프로젝트 ID.
+        actor: 팀장 여부를 확인할 사용자.
+        for_update: 참이면 조회한 프로젝트 행을 잠근다.
+
+    Returns:
+        요청자의 팀장 여부가 annotation된 프로젝트.
+
+    Raises:
+        Project.DoesNotExist: 프로젝트가 없거나 삭제된 경우.
+    """
     queryset = Project.objects.exclude(
         status=Project.Status.DELETED,
     ).annotate(
@@ -316,6 +335,12 @@ def _require_actor_is_leader(project: Project) -> None:
 
     멤버 관리 쓰기 권한의 공통 판정이다. 조기 거절과 Service 잠금 후
     재확인이 같은 규칙·메시지를 쓰도록 여기에만 둔다.
+
+    Args:
+        project: 요청자의 팀장 여부가 annotation된 프로젝트.
+
+    Raises:
+        PermissionDenied: 요청자가 참여 중인 팀장이 아닌 경우.
     """
     if not getattr(project, "actor_is_leader", False):
         raise PermissionDenied("프로젝트 리더만 멤버 상태를 변경할 수 있습니다.")
@@ -329,6 +354,10 @@ def create_membership_application(
     """프로젝트 참가 신청을 PENDING 멤버십으로 생성한다.
 
     과거 신청 이력 전체를 Project의 신청 가능 여부 검증에 사용한다.
+
+    Args:
+        actor: 참가 신청을 요청한 사용자.
+        project_id: 참가 신청 대상 프로젝트 ID.
 
     Raises:
         Project.DoesNotExist: 프로젝트가 없거나 삭제된 경우.
@@ -361,6 +390,13 @@ def get_membership_cancel_target(
     삭제된 프로젝트는 멤버십이 남아 있어도 404로 거절한다. 사유(description)
     검사는 body 파싱 이후 `cancel_or_leave_membership()`에서 수행한다.
 
+    Args:
+        actor: 신청 취소 또는 탈퇴를 요청한 사용자.
+        project_id: 대상 프로젝트 ID.
+
+    Returns:
+        기본 상태 전이가 가능한 최신 멤버십. 팀장 멤버십을 우선한다.
+
     Raises:
         Project.DoesNotExist: 프로젝트가 없거나 삭제된 경우.
         Member.DoesNotExist: 사용자의 멤버십 이력이 없는 경우.
@@ -392,6 +428,12 @@ def cancel_or_leave_membership(
     이후에 생성된 신청 이력이 있더라도 팀장 보호 규칙을 우회하지 못하게
     한다. update_description이 참이면 description이 None인 경우도
     저장하고, 거짓이면 기존 사유를 유지한다.
+
+    Args:
+        actor: 신청 취소 또는 탈퇴를 요청한 사용자.
+        project_id: 대상 프로젝트 ID.
+        description: 탈퇴 사유. 신청 취소와 자진 탈퇴에서는 선택 사항이다.
+        update_description: description 필드를 갱신할지 여부.
 
     Raises:
         Project.DoesNotExist: 프로젝트가 없거나 삭제된 경우.
@@ -434,6 +476,13 @@ def get_project_member_management_target(
 
     입력 검증보다 앞선 조기 거절용이다. 권한의 기준(최종 차단)은
     `change_project_member_status()`의 잠금 후 재확인이다.
+
+    Args:
+        actor: 멤버 상태 변경을 요청한 사용자.
+        project_id: 대상 프로젝트 ID.
+
+    Returns:
+        요청자의 팀장 여부가 확인된 프로젝트.
 
     Raises:
         Project.DoesNotExist: 프로젝트가 없거나 삭제된 경우.
