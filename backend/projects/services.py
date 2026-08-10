@@ -60,6 +60,27 @@ class ProjectCreationResult:
     repository_error: RepositoryRegistrationError | None
 
 
+def _ensure_project_name_is_available(
+    *,
+    name: str,
+    exclude_project_id: int | None = None,
+) -> None:
+    """다른 프로젝트가 사용 중인 이름이면 입력 오류를 발생시킨다.
+
+    Args:
+        name: 생성하거나 변경할 프로젝트명.
+        exclude_project_id: 중복 검사에서 제외할 수정 대상 프로젝트 ID.
+
+    Raises:
+        ProjectCreationError: 다른 프로젝트가 같은 이름을 사용하는 경우.
+    """
+    projects = Project.objects.filter(name=name)
+    if exclude_project_id is not None:
+        projects = projects.exclude(pk=exclude_project_id)
+    if projects.exists():
+        raise ProjectCreationError("이미 등록된 프로젝트명입니다.")
+
+
 def _registration_error(
     error: GitHubClientError,
 ) -> RepositoryRegistrationError:
@@ -216,6 +237,8 @@ def create_project(
         ProjectCreationError: 이미 등록된 프로젝트명인 경우.
         IntegrityError: 언어 또는 팀장 멤버십 저장에 실패한 경우.
     """
+    _ensure_project_name_is_available(name=name)
+
     with transaction.atomic():
         try:
             project = Project.objects.create(
@@ -364,6 +387,10 @@ def update_project(
 
     # GitHub 조회 전에 상태 전이를 먼저 막아 불필요한 외부 호출을 줄인다.
     project.assert_can_transition_to(status)
+    _ensure_project_name_is_available(
+        name=name,
+        exclude_project_id=project.pk,
+    )
 
     repository_data = prepare_project_repository_update(
         project,

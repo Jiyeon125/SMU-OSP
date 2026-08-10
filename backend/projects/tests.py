@@ -1389,11 +1389,17 @@ class ProjectApiTests(TestCase):
         Project.objects.create(name="Existing Project", description="기존 프로젝트")
         self.client.force_login(self.user)
 
-        response = self.client.put(
-            f"/api/v1/projects/{self.project.pk}",
-            data=self.project_update_payload(name="Existing Project"),
-            content_type="application/json",
-        )
+        with patch(
+            "projects.services.fetch_repository_identity"
+        ) as fetch_identity:
+            response = self.client.put(
+                f"/api/v1/projects/{self.project.pk}",
+                data=self.project_update_payload(
+                    name="Existing Project",
+                    repositoryUrl="https://github.com/example/new-project",
+                ),
+                content_type="application/json",
+            )
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["status"], "INVALID_PROJECT_INPUT")
@@ -1401,6 +1407,7 @@ class ProjectApiTests(TestCase):
             response.json()["detail"]["message"],
             "이미 등록된 프로젝트명입니다.",
         )
+        fetch_identity.assert_not_called()
 
     def test_project_update_maps_name_integrity_error_to_400(self):
         """Serializer를 지나친 이름 충돌도 생성과 같이 400이다."""
@@ -1866,22 +1873,29 @@ class ProjectApiTests(TestCase):
         member_count = Member.objects.count()
         repository_count = Repository.objects.count()
 
-        response = self.client.post(
-            "/api/v1/projects/",
-            data={
-                "name": "SOSP",
-                "description": "이미 존재하는 프로젝트명입니다.",
-            },
-            content_type="application/json",
-        )
+        with patch(
+            "projects.services.fetch_repository_identity"
+        ) as fetch_identity:
+            response = self.client.post(
+                "/api/v1/projects/",
+                data={
+                    "name": "SOSP",
+                    "description": "이미 존재하는 프로젝트명입니다.",
+                    "repositoryUrl": "https://github.com/example/new-project",
+                },
+                content_type="application/json",
+            )
 
         self.assertEqual(response.status_code, 400)
         body = response.json()
         self.assertEqual(body["status"], "INVALID_PROJECT_INPUT")
-        self.assertEqual(body["detail"]["message"], "이미 등록된 프로젝트명입니다.")
+        self.assertEqual(
+            body["detail"]["message"], "이미 등록된 프로젝트명입니다."
+        )
         self.assertEqual(Project.objects.filter(name="SOSP").count(), 1)
         self.assertEqual(Member.objects.count(), member_count)
         self.assertEqual(Repository.objects.count(), repository_count)
+        fetch_identity.assert_not_called()
 
     def test_create_project_rolls_back_when_leader_member_creation_fails(self):
         self.client.force_login(self.user)

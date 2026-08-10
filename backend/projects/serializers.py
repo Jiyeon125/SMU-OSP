@@ -176,17 +176,6 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
             "프로젝트명",
             allow_newlines=False,
         )
-        projects_with_same_name = Project.objects.filter(name=name)
-        exclude_project_id = self.context.get("project_id")
-        if exclude_project_id is not None:
-            projects_with_same_name = projects_with_same_name.exclude(
-                pk=exclude_project_id
-            )
-        if projects_with_same_name.exists():
-            raise serializers.ValidationError(
-                {"name": "이미 등록된 프로젝트명입니다."}
-            )
-
         attrs["name"] = name
         attrs["description"] = self._validate_plain_text(
             "description",
