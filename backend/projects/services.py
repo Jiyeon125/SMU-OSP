@@ -1,7 +1,7 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, transaction
 from django.db.models import Exists, OuterRef
 
@@ -318,10 +318,7 @@ def _require_actor_is_leader(project: Project) -> None:
     재확인이 같은 규칙·메시지를 쓰도록 여기에만 둔다.
     """
     if not getattr(project, "actor_is_leader", False):
-        raise ValidationError(
-            "프로젝트 리더만 멤버 상태를 변경할 수 있습니다.",
-            code="leader_required",
-        )
+        raise PermissionDenied("프로젝트 리더만 멤버 상태를 변경할 수 있습니다.")
 
 
 def create_membership_application(
