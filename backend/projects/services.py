@@ -290,26 +290,12 @@ def _ensure_actor_is_leader(
     INACTIVE→ACTIVE 쓰기 경로에 쓰면 회귀한다. 쓰기 권한은
     `Project.is_leader()`와 같은 조건으로만 판정한다.
 
-    `queryset_with_actor_leadership()`로 조회된 경우 Exists annotation을
-    쓰고, 그렇지 않으면 Member를 읽어 `Project.is_leader()`로 확인한다.
+    `queryset_with_actor_leadership()`가 붙인 `actor_is_leader` annotation을
+    사용한다. 호출자는 반드시 해당 QuerySet으로 프로젝트를 조회해야 한다.
     """
     if not actor.is_authenticated:
         raise PermissionDenied
-    actor_is_leader = getattr(project, "actor_is_leader", None)
-    if actor_is_leader is not None:
-        if not actor_is_leader:
-            raise PermissionDenied
-        return
-    member = (
-        Member.objects.filter(
-            project_id=project.pk,
-            user_id=actor.pk,
-            status=Member.Status.JOINED,
-        )
-        .order_by("-is_leader", "-created_at", "-pk")
-        .first()
-    )
-    if not project.is_leader(member):
+    if not project.actor_is_leader:
         raise PermissionDenied
 
 
