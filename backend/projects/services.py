@@ -492,11 +492,14 @@ def change_project_member_status(
             .get(project_id=project_id, pk=member_id, is_leader=False)
         )
         member.project = project
-        member.transition_to(
-            next_status,
-            description=description,
-            update_description=update_description,
-        )
+        if next_status == Member.Status.LEFT:
+            member.remove_from_project(description=description)
+        else:
+            member.transition_to(
+                next_status,
+                description=description,
+                update_description=update_description,
+            )
         member.save(
             update_fields=(
                 "status",

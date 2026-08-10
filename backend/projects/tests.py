@@ -2400,7 +2400,7 @@ class ProjectApiTests(TestCase):
         with self.assertRaises(ValidationError):
             membership.transition_to(Member.Status.LEFT)
 
-    def test_member_transition_to_requires_reason_for_left(self):
+    def test_member_remove_from_project_requires_reason(self):
         membership = Member.objects.create(
             project=self.project,
             user=self.user,
@@ -2411,9 +2411,21 @@ class ProjectApiTests(TestCase):
             ValidationError,
             "멤버를 내보내려면 사유를 입력해주세요.",
         ):
-            membership.transition_to(Member.Status.LEFT)
+            membership.remove_from_project(description=None)
 
         self.assertEqual(membership.status, Member.Status.JOINED)
+
+    def test_member_transition_to_allows_left_without_reason(self):
+        membership = Member.objects.create(
+            project=self.project,
+            user=self.user,
+            status=Member.Status.JOINED,
+        )
+
+        membership.transition_to(Member.Status.LEFT)
+
+        self.assertEqual(membership.status, Member.Status.LEFT)
+        self.assertIsNone(membership.description)
 
     def test_pending_project_membership_can_be_canceled(self):
         application_project = Project.objects.create(
@@ -2459,6 +2471,27 @@ class ProjectApiTests(TestCase):
         joined_member.refresh_from_db()
         self.assertEqual(joined_member.status, Member.Status.LEFT)
         self.assertEqual(joined_member.description, "개인 일정으로 탈퇴")
+
+    def test_joined_project_membership_can_be_left_without_description(self):
+        joined_project = Project.objects.create(
+            name="Joined Project Without Reason",
+            description="Joined project description",
+        )
+        joined_member = Member.objects.create(
+            project=joined_project,
+            user=self.user,
+            status=Member.Status.JOINED,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.delete(
+            f"/api/v1/projects/{joined_project.pk}/members"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        joined_member.refresh_from_db()
+        self.assertEqual(joined_member.status, Member.Status.LEFT)
+        self.assertIsNone(joined_member.description)
 
     def test_project_leader_cannot_leave(self):
         self.client.force_login(self.user)

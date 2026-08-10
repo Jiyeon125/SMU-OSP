@@ -254,8 +254,6 @@ class Member(CommonModel):
     description = models.CharField(max_length=255, null=True, blank=True)
     joined_at = models.DateTimeField(null=True, blank=True)
 
-    _STATUSES_REQUIRING_DESCRIPTION = frozenset({Status.LEFT})
-
     def assert_transition_structure(
         self,
         next_status: str | None = None,
@@ -305,38 +303,26 @@ class Member(CommonModel):
             )
         return next_status
 
-    def assert_can_transition_to(
-        self,
-        next_status: str | None = None,
-        *,
-        description: str | None = None,
-    ) -> str:
-        """상태 전이가 가능한지 확인하고 적용할 상태를 반환한다.
-
-        LEFT 전이는 사유가 비어 있으면 거부한다. 호출측에서 사유 검사를
-        끌 수 없다.
+    def remove_from_project(self, *, description: str | None) -> None:
+        """팀장 조치로 멤버를 내보내고 사유를 기록한다.
 
         Args:
-            next_status: 목표 상태. None이면 PENDING→CANCELED,
-                JOINED→LEFT로 해석한다.
-            description: 전이 사유. LEFT일 때 필수이다.
-
-        Returns:
-            적용할 다음 상태 값.
+            description: 필수 내보내기 사유.
 
         Raises:
-            ValidationError: 전이 불가, 팀장 보호, 사유 누락, 정원 초과.
+            ValidationError: 사유가 없거나 LEFT 전이가 불가능한 경우.
         """
-        next_status = self.assert_transition_structure(next_status)
-        if (
-            next_status in self._STATUSES_REQUIRING_DESCRIPTION
-            and not (description or "").strip()
-        ):
+        description = (description or "").strip()
+        if not description:
             raise ValidationError(
                 "멤버를 내보내려면 사유를 입력해주세요.",
                 code="member_description_required",
             )
-        return next_status
+        self.transition_to(
+            self.Status.LEFT,
+            description=description,
+            update_description=True,
+        )
 
     def transition_to(
         self,
@@ -352,10 +338,7 @@ class Member(CommonModel):
             description: 전이 사유.
             update_description: 참이면 description 필드를 갱신한다.
         """
-        next_status = self.assert_can_transition_to(
-            next_status,
-            description=description,
-        )
+        next_status = self.assert_transition_structure(next_status)
         self.status = next_status
         if next_status == self.Status.JOINED:
             self.joined_at = timezone.now()
