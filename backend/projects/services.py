@@ -437,7 +437,7 @@ def get_project_member_management_target(
 
     Raises:
         Project.DoesNotExist: 프로젝트가 없거나 삭제된 경우.
-        ValidationError: 요청자가 팀장이 아닌 경우.
+        PermissionDenied: 요청자가 팀장이 아닌 경우.
     """
     project = _get_visible_project_for_actor(
         project_id=project_id,
@@ -477,7 +477,8 @@ def change_project_member_status(
     Raises:
         Project.DoesNotExist: 프로젝트가 없거나 삭제된 경우.
         Member.DoesNotExist: 변경 가능한 일반 멤버가 존재하지 않는 경우.
-        ValidationError: 팀장 권한이나 상태 전이 조건을 만족하지 않는 경우.
+        PermissionDenied: 요청자가 팀장이 아닌 경우.
+        ValidationError: 상태 전이 조건을 만족하지 않는 경우.
     """
     with transaction.atomic():
         project = _get_visible_project_for_actor(
