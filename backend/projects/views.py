@@ -560,17 +560,6 @@ class ProjectMembers(APIView):
 class ProjectMemberDetail(APIView):
     @api_login_required
     def put(self, request, pk, member_id):
-        serializer = ProjectMemberUpdateSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(
-                fail(
-                    "INVALID_MEMBER_INPUT",
-                    first_serializer_error(serializer.errors),
-                    status.HTTP_400_BAD_REQUEST,
-                ),
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         try:
             if not Project.objects.filter(pk=pk).exists():
                 raise Project.DoesNotExist
@@ -579,7 +568,10 @@ class ProjectMemberDetail(APIView):
                 user_id=request.user.pk,
             )
 
+            serializer = ProjectMemberUpdateSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
             change_project_member_status(
+                actor=request.user,
                 project_id=pk,
                 member_id=member_id,
                 next_status=serializer.validated_data["status"],
@@ -606,6 +598,15 @@ class ProjectMemberDetail(APIView):
             )
         except ProjectPermissionDenied as error:
             return _project_permission_denied_response(error)
+        except DRFValidationError as error:
+            return Response(
+                fail(
+                    "INVALID_MEMBER_INPUT",
+                    first_serializer_error(error.detail),
+                    status.HTTP_400_BAD_REQUEST,
+                ),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         except ValidationError as error:
             response_status = {
                 "project_capacity_reached": "PROJECT_CAPACITY_REACHED",

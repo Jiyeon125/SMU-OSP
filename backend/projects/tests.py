@@ -2956,7 +2956,7 @@ class ProjectApiTests(TestCase):
         self.assertEqual(response.json()["status"], "PERMISSION_DENIED")
         self.assertEqual(
             response.json()["detail"]["message"],
-            "프로젝트 리더만 멤버 상태를 변경할 수 있습니다.",
+            "프로젝트 접근 권한이 없습니다.",
         )
         pending.refresh_from_db()
         self.assertEqual(pending.status, Member.Status.PENDING)
