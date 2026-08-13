@@ -28,7 +28,6 @@ from .permissions import (
     require_project_leader,
 )
 from .selectors import (
-    get_joined_project_member,
     get_project_detail,
     list_memberships_for_user,
     list_project_members,
