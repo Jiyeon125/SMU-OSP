@@ -1038,6 +1038,47 @@ class ProjectApiTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["status"], "PERMISSION_DENIED")
+        self.assertEqual(
+            response.json()["detail"]["message"],
+            "프로젝트 접근 권한이 없습니다.",
+        )
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.name, "SOSP")
+
+    def test_project_update_and_delete_require_login(self):
+        update_response = self.client.put(
+            f"/api/v1/projects/{self.project.pk}",
+            data=self.project_update_payload(name="익명 수정"),
+            content_type="application/json",
+        )
+        delete_response = self.client.delete(
+            f"/api/v1/projects/{self.project.pk}"
+        )
+
+        for response in (update_response, delete_response):
+            self.assertEqual(response.status_code, 403)
+            self.assertEqual(response.json()["status"], "PERMISSION_DENIED")
+            self.assertEqual(
+                response.json()["detail"]["message"],
+                "로그인이 필요합니다.",
+            )
+
+    def test_anonymous_user_cannot_use_orphaned_leader_membership(self):
+        Member.objects.create(
+            project=self.project,
+            user=None,
+            status=Member.Status.JOINED,
+            is_leader=True,
+        )
+
+        response = self.client.put(
+            f"/api/v1/projects/{self.project.pk}",
+            data=self.project_update_payload(name="익명 수정"),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["status"], "PERMISSION_DENIED")
         self.project.refresh_from_db()
         self.assertEqual(self.project.name, "SOSP")
 
@@ -1122,6 +1163,10 @@ class ProjectApiTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["status"], "PERMISSION_DENIED")
+        self.assertEqual(
+            response.json()["detail"]["message"],
+            "프로젝트 접근 권한이 없습니다.",
+        )
         self.project.refresh_from_db()
         self.assertEqual(self.project.status, Project.Status.ACTIVE)
 
@@ -2416,6 +2461,10 @@ class ProjectApiTests(TestCase):
         )
         self.assertEqual(denied.status_code, 403)
         self.assertEqual(update_denied.status_code, 403)
+        self.assertEqual(
+            update_denied.json()["detail"]["message"],
+            "프로젝트 접근 권한이 없습니다.",
+        )
 
         self.client.force_login(self.user)
         managed = self.client.get(
@@ -2462,6 +2511,10 @@ class ProjectApiTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["status"], "PERMISSION_DENIED")
+        self.assertEqual(
+            response.json()["detail"]["message"],
+            "프로젝트 접근 권한이 없습니다.",
+        )
 
     def test_project_leader_can_apply_confirmed_member_transitions(self):
         applicant = get_user_model().objects.create_user(

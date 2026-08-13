@@ -42,6 +42,47 @@ class ProjectCreationError(ValueError):
     """프로젝트 생성 중 예상 가능한 입력 충돌을 나타낸다."""
 
 
+def change_project_member_status(
+    *,
+    project_id: int,
+    member_id: int,
+    next_status: str,
+    description: str | None,
+    update_description: bool,
+) -> None:
+    """프로젝트 멤버 상태를 변경한다.
+
+    Args:
+        project_id: 대상 프로젝트 ID.
+        member_id: 대상 멤버 ID.
+        next_status: 변경할 멤버 상태.
+        description: 상태 변경 사유.
+        update_description: 사유 필드를 갱신할지 여부.
+
+    Raises:
+        Project.DoesNotExist: 프로젝트가 없거나 삭제된 경우.
+        Member.DoesNotExist: 변경할 일반 멤버가 없는 경우.
+        ValidationError: 허용되지 않는 상태 변경인 경우.
+    """
+    with transaction.atomic():
+        project = Project.objects.select_for_update().get(pk=project_id)
+        member = Member.objects.select_for_update().get(
+            project_id=project_id,
+            pk=member_id,
+            is_leader=False,
+        )
+        member.project = project
+        member.transition_to(
+            next_status,
+            description=description,
+            update_description=update_description,
+            require_description=next_status == Member.Status.LEFT,
+        )
+        member.save(
+            update_fields=("status", "description", "joined_at", "updated_at")
+        )
+
+
 @dataclass(frozen=True)
 class ProjectCreationResult:
     """프로젝트 생성 결과와 비치명적 Repository 등록 오류를 나타낸다.
@@ -111,10 +152,10 @@ def prepare_repository_registration(
 
 
 def prepare_project_repository_update(
-    project: Project,
+    project_id: int,
     repository_url: str | None,
 ) -> GitHubRepositoryIdentity | None:
-    repository = getattr(project, "repository", None)
+    repository = Repository.objects.filter(project_id=project_id).first()
     if repository is not None:
         if repository_url != repository.html_url:
             raise ValueError(REPOSITORY_CHANGE_NOT_ALLOWED_MESSAGE)
