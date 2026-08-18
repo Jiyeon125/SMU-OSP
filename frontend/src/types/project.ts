@@ -1,3 +1,5 @@
+import type { ApiSuccess, PaginationDetail } from "./response";
+
 export type ProjectStatus = "ACTIVE" | "FINISHED" | "INACTIVE" | "DELETED";
 export type ProjectMemberRole = "LEADER" | "MEMBER";
 export type ProjectApplicationStatus = "PENDING" | "JOINED" | "DECLINED" | "LEFT" | "CANCELED";
@@ -88,6 +90,20 @@ export interface ProjectCreateDetail {
 export interface ProjectUpdateInput extends ProjectInput {
     status: "ACTIVE" | "FINISHED";
 }
+
+/** 프로젝트 한 건의 1년 GitHub 지표 랭킹 결과입니다. */
+export interface ProjectRanking {
+    rank: number;
+    projectId: number;
+    projectName: string;
+    totalScore: string;
+    stars: number;
+    forks: number;
+    commits: number;
+    pullRequests: number;
+}
+
+export type ProjectRankingResponse = ApiSuccess<ProjectRanking[], PaginationDetail>;
 
 export const PROJECT_STATUS_LABEL: Record<ProjectStatus, string> = {
     ACTIVE: "진행 중",

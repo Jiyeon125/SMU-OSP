@@ -54,6 +54,7 @@ CUSTOM_APPS = [
     "posts.apps.PostsConfig",
     "teams.apps.TeamsConfig",
     "projects.apps.ProjectsConfig",
+    "rankings.apps.RankingsConfig",
 ]
 
 SYSTEM_APPS = [
@@ -192,6 +193,22 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default="redis://127.0.0.1:6379/0")
 CELERY_TIMEZONE = "Asia/Seoul"
+PROJECT_RANKING_STARS_WEIGHT = env(
+    "PROJECT_RANKING_STARS_WEIGHT",
+    default="1.00",
+)
+PROJECT_RANKING_FORKS_WEIGHT = env(
+    "PROJECT_RANKING_FORKS_WEIGHT",
+    default="1.00",
+)
+PROJECT_RANKING_COMMITS_WEIGHT = env(
+    "PROJECT_RANKING_COMMITS_WEIGHT",
+    default="1.00",
+)
+PROJECT_RANKING_PULL_REQUESTS_WEIGHT = env(
+    "PROJECT_RANKING_PULL_REQUESTS_WEIGHT",
+    default="1.00",
+)
 REPOSITORY_REFRESH_TASK_RATE_LIMIT = env(
     "REPOSITORY_REFRESH_TASK_RATE_LIMIT",
     default="10/m",
@@ -205,6 +222,10 @@ CELERY_BEAT_SCHEDULE = {
     "repository-refresh": {
         "task": "projects.tasks.enqueue_daily_repository_refreshes",
         "schedule": crontab(minute="10", hour="0,1,2"),
+    },
+    "project-ranking": {
+        "task": "rankings.tasks.calculate_daily_project_rankings",
+        "schedule": crontab(minute="0", hour="6"),
     },
 }
 
