@@ -90,7 +90,7 @@ def search_trending_repositories(
     language: str,
     created_after: str,
     page: int,
-    per_page: int = 10,
+    per_page: int,
 ) -> TrendingRepositorySearchPage:
     """조건에 맞는 공개 Repository를 Star 내림차순으로 조회한다.
 

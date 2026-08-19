@@ -57,13 +57,11 @@ def list_recent_github_ids(selected_after: datetime) -> set[int]:
     )
 
 
-def list_trending_repositories(
-    limit: int = 10,
-) -> list[TrendingRepository]:
+def list_trending_repositories() -> list[TrendingRepository]:
     """가장 최근 선정에 포함된 Repository를 순위대로 조회한다."""
     latest_selection = TrendingRepositorySelection.objects.values("pk")[:1]
     return list(
         TrendingRepository.objects.filter(
             selection_id=Subquery(latest_selection),
-        ).order_by("position", "github_id")[:limit]
+        ).order_by("position", "github_id")[:10]
     )

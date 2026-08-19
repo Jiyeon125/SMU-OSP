@@ -49,6 +49,7 @@ class TrendingGitHubClientTests(TestCase):
             language="Python",
             created_after="2026-02-19",
             page=1,
+            per_page=10,
         )
 
         params = request_get.call_args.kwargs["params"]
