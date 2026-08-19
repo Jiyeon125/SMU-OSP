@@ -20,10 +20,6 @@ const sliderSettings = {
   pauseOnHover: true,
   slidesToShow: 3,
   slidesToScroll: 1,
-  responsive: [
-    { breakpoint: 1024, settings: { slidesToShow: 2 } },
-    { breakpoint: 700, settings: { slidesToShow: 1 } },
-  ],
 };
 
 const languageColors: Record<string, string> = {
@@ -103,6 +99,24 @@ export default function TrendingRepositoryCarousel() {
   });
   const repositories = data?.data ?? [];
   const canRotate = repositories.length > sliderSettings.slidesToShow;
+  const responsiveSettings = [
+    {
+      breakpoint: 1024,
+      settings: {
+        slidesToShow: 2,
+        infinite: repositories.length > 2,
+        autoplay: repositories.length > 2,
+      },
+    },
+    {
+      breakpoint: 700,
+      settings: {
+        slidesToShow: 1,
+        infinite: repositories.length > 1,
+        autoplay: repositories.length > 1,
+      },
+    },
+  ];
 
   return (
     <Box
@@ -149,6 +163,7 @@ export default function TrendingRepositoryCarousel() {
               {...sliderSettings}
               infinite={canRotate}
               autoplay={canRotate}
+              responsive={responsiveSettings}
             >
               {repositories.map((repository) => (
                 <RepositoryCard
