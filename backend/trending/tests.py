@@ -184,3 +184,41 @@ class TrendingApiTests(TestCase):
         self.assertEqual(len(body["data"]), 10)
         self.assertEqual(body["data"][0]["githubId"], 1)
         self.assertEqual(body["data"][-1]["githubId"], 10)
+
+    def test_only_repositories_from_latest_selection_are_returned(self):
+        previous_selection = TrendingRepositorySelection.objects.create(
+            week_start=datetime(2026, 8, 10).date()
+        )
+        latest_selection = TrendingRepositorySelection.objects.create(
+            week_start=datetime(2026, 8, 17).date()
+        )
+        TrendingRepository.objects.create(
+            selection=previous_selection,
+            github_id=1,
+            full_name="owner/previous",
+            html_url="https://github.com/owner/previous",
+            description=None,
+            language="Python",
+            stars=3000,
+            forks=100,
+            position=1,
+        )
+        TrendingRepository.objects.create(
+            selection=latest_selection,
+            github_id=2,
+            full_name="owner/latest",
+            html_url="https://github.com/owner/latest",
+            description=None,
+            language="Python",
+            stars=2000,
+            forks=50,
+            position=1,
+        )
+
+        response = self.client.get("/api/v1/trending/repositories")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [item["githubId"] for item in response.json()["data"]],
+            [2],
+        )

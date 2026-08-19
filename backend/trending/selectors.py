@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from django.db.models import Sum
+from django.db.models import Subquery, Sum
 
 from projects.models import RepositoryLanguage
 
@@ -59,12 +59,10 @@ def list_recent_github_ids(selected_after: datetime) -> set[int]:
 def list_trending_repositories(
     limit: int = 10,
 ) -> list[TrendingRepository]:
-    """최근 선정 시각과 당시 순위에 따라 노출 Repository를 조회한다."""
+    """가장 최근 선정에 포함된 Repository를 순위대로 조회한다."""
+    latest_selection = TrendingRepositorySelection.objects.values("pk")[:1]
     return list(
-        TrendingRepository.objects.select_related("selection")
-        .order_by(
-            "-selection__created_at",
-            "position",
-            "github_id",
-        )[:limit]
+        TrendingRepository.objects.filter(
+            selection_id=Subquery(latest_selection),
+        ).order_by("position", "github_id")[:limit]
     )
