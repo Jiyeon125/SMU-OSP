@@ -61,6 +61,7 @@ def _collect_candidates(
     excluded_github_ids: set[int],
 ) -> list[TrendingRepositoryCandidate]:
     candidates: list[TrendingRepositoryCandidate] = []
+    selected: list[TrendingRepositoryCandidate] = []
     pages = dict.fromkeys(languages, 1)
     has_next = dict.fromkeys(languages, True)
     while any(has_next.values()):
@@ -82,10 +83,7 @@ def _collect_candidates(
         )
         if len(selected) == COLLECTION_LIMIT:
             return selected
-    return _select_candidates(
-        candidates,
-        excluded_github_ids=excluded_github_ids,
-    )
+    return selected
 
 
 def collect_trending_repositories(*, collected_at: datetime) -> int:
