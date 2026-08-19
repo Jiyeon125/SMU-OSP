@@ -81,8 +81,11 @@ class User(AbstractUser):
 
 
 class UserActivity(CommonModel):
+    """사용자의 일별 GitHub 활동과 누적 Star 스냅샷."""
+
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="activities")
     activity_date = models.DateField(null=True)
+    stars = models.PositiveIntegerField(null=True)
     commits = models.IntegerField(default=0)
     prs = models.IntegerField(default=0)
     issues = models.IntegerField(default=0)

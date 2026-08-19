@@ -3,6 +3,9 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
+from users.models import UserActivity
+from users.tasks import save_yesterday_contributions
+
 
 class UserSignalTests(TestCase):
     @patch("users.signals.initial_process.delay")
@@ -19,6 +22,46 @@ class UserSignalTests(TestCase):
 
         self.assertEqual(len(callbacks), 1)
         delay.assert_called_once_with("celery-test")
+
+
+class UserActivityStarSnapshotTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="activity-test",
+            github_email="activity-test@example.com",
+            name="활동 테스트 사용자",
+            student_id=2,
+            major="IT공학",
+        )
+
+    @patch("users.tasks.requests.post")
+    def test_saves_star_snapshot_with_yesterday_activity(self, post):
+        post.return_value.json.return_value = {
+            "data": {
+                "user": {
+                    "contributionsCollection": {
+                        "totalCommitContributions": 3,
+                        "pullRequestContributions": {"totalCount": 2},
+                        "issueContributionsByRepository": [
+                            {"contributions": {"totalCount": 1}},
+                        ],
+                    }
+                }
+            }
+        }
+
+        save_yesterday_contributions(self.user, stars=7)
+
+        activity = UserActivity.objects.get(user=self.user)
+        self.assertEqual(activity.stars, 7)
+        self.assertEqual(activity.commits, 3)
+        self.assertEqual(activity.prs, 2)
+        self.assertEqual(activity.issues, 1)
+
+    def test_stars_are_unknown_until_collected(self):
+        activity = UserActivity.objects.create(user=self.user)
+
+        self.assertIsNone(activity.stars)
 
 
 class UserListApiTests(TestCase):

@@ -33,7 +33,7 @@ def daily_update():
         user.stars = stars
         user.save()
 
-        save_yesterday_contributions(user)
+        save_yesterday_contributions(user, stars)
 
         user.update_contributions()
         user.update_score()
@@ -173,7 +173,7 @@ def save_previous_contributions(user, created_at):
         print(f"An error occurred: {e}")
 
 
-def save_yesterday_contributions(user):
+def save_yesterday_contributions(user, stars):
     try:
         print("Start gathering yesterday contribution data")
 
@@ -224,7 +224,7 @@ def save_yesterday_contributions(user):
 
         print("Saving data start")
         userActivity = UserActivity.objects.create(
-            user=user, activity_date=current_date
+            user=user, activity_date=current_date, stars=stars
         )
         # userActivity.activity_date = current_date
         userActivity.commits = commits
