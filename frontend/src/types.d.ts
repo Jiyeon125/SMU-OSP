@@ -20,7 +20,8 @@ export interface IPublicUser {
 
 export type PublicUserListResponse = ApiSuccess<IPublicUser[], PaginationDetail>;
 
-export interface ITrendingRepository {
+/** 메인 화면에 노출하는 트렌딩 GitHub Repository입니다. */
+export interface TrendingRepository {
   githubId: number;
   fullName: string;
   htmlUrl: string;
@@ -30,10 +31,8 @@ export interface ITrendingRepository {
   forks: number;
 }
 
-export type TrendingRepositoryListResponse = ApiSuccess<
-  ITrendingRepository[],
-  null
->;
+/** 트렌딩 GitHub Repository 목록 응답입니다. */
+export type TrendingRepositoryListResponse = ApiSuccess<TrendingRepository[], null>;
 
 export interface IPost {
   id: number;

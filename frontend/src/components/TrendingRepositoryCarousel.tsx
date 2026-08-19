@@ -9,7 +9,7 @@ import {
 } from "react-icons/lu";
 import Slider from "react-slick";
 import { getTrendingRepositories } from "../api";
-import type { ITrendingRepository } from "../types";
+import type { TrendingRepository } from "../types";
 
 const sliderSettings = {
   dots: false,
@@ -34,7 +34,7 @@ const languageColors: Record<string, string> = {
   PHP: "#4F5D95",
 };
 
-function RepositoryCard({ repository }: { repository: ITrendingRepository }) {
+function RepositoryCard({ repository }: { repository: TrendingRepository }) {
   return (
     <Box px={2}>
       <Box
