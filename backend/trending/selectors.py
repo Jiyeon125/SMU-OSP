@@ -21,7 +21,7 @@ def list_collection_languages(
 ) -> list[str]:
     """Repository 사용량을 기준으로 이번 수집 언어를 반환한다."""
     excluded = {language.casefold() for language in excluded_languages}
-    language_totals = list(
+    language_totals = (
         RepositoryLanguage.objects.values("language")
         .annotate(total_bytes=Sum("bytes"))
         .order_by("-total_bytes", "language")

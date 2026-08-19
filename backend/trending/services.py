@@ -5,7 +5,6 @@ from django.db import transaction
 
 from .github_client import (
     TrendingRepositoryCandidate,
-    TrendingRepositorySearchPage,
     search_trending_repositories,
 )
 from .models import TrendingRepository, TrendingRepositorySelection
@@ -68,13 +67,11 @@ def _collect_candidates(
         for language in languages:
             if not has_next[language]:
                 continue
-            result: TrendingRepositorySearchPage = (
-                search_trending_repositories(
-                    language=language,
-                    created_after=created_after,
-                    page=pages[language],
-                    per_page=SEARCH_PAGE_SIZE,
-                )
+            result = search_trending_repositories(
+                language=language,
+                created_after=created_after,
+                page=pages[language],
+                per_page=SEARCH_PAGE_SIZE,
             )
             candidates.extend(result.repositories)
             has_next[language] = result.has_next
