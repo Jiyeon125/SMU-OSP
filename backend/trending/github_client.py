@@ -1,6 +1,4 @@
-from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import cast
 
 import requests
 from django.conf import settings
@@ -49,7 +47,7 @@ def _parse_repository(
 ) -> TrendingRepositoryCandidate:
     if not isinstance(raw_repository, dict):
         raise GitHubSearchError("GitHub 검색 응답 형식이 올바르지 않습니다.")
-    repository = cast(Mapping[str, object], raw_repository)
+    repository = raw_repository
     github_id = repository.get("id")
     full_name = repository.get("full_name")
     html_url = repository.get("html_url")
