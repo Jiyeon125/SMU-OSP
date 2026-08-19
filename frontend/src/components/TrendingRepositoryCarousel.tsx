@@ -1,14 +1,20 @@
-import { Box, HStack, Text } from "@chakra-ui/react";
+import { useRef } from "react";
+import { Box, HStack, IconButton, Text } from "@chakra-ui/react";
 import { useQuery } from "@tanstack/react-query";
-import { LuGitFork, LuStar } from "react-icons/lu";
+import {
+  LuChevronLeft,
+  LuChevronRight,
+  LuGitFork,
+  LuStar,
+} from "react-icons/lu";
 import Slider from "react-slick";
 import { getTrendingRepositories } from "../api";
 import type { ITrendingRepository } from "../types";
 
 const sliderSettings = {
-  dots: true,
-  arrows: true,
-  infinite: false,
+  dots: false,
+  arrows: false,
+  infinite: true,
   speed: 400,
   slidesToShow: 3,
   slidesToScroll: 1,
@@ -34,10 +40,7 @@ function RepositoryCard({ repository }: { repository: ITrendingRepository }) {
   return (
     <Box px={2}>
       <Box
-        as="a"
-        href={repository.htmlUrl}
-        target="_blank"
-        rel="noreferrer"
+        asChild
         display="block"
         minH="155px"
         p={4}
@@ -47,34 +50,42 @@ function RepositoryCard({ repository }: { repository: ITrendingRepository }) {
         bg="white"
         _hover={{ borderColor: "smu.lightBlue", boxShadow: "sm" }}
       >
-        <Text color="smu.blue" fontWeight="bold" truncate>
-          {repository.fullName}
-        </Text>
-        <Text mt={2} minH="42px" color="smu.darkGray" fontSize="sm" lineClamp={2}>
-          {repository.description || "등록된 Repository 설명이 없습니다."}
-        </Text>
-        <HStack mt={4} justifyContent="space-between" fontSize="xs">
-          <HStack gap={1} minW={0}>
-            <Box
-              width="10px"
-              height="10px"
-              flexShrink={0}
-              borderRadius="full"
-              bg={languageColors[repository.language] || "smu.smuGray"}
-            />
-            <Text truncate>{repository.language}</Text>
-          </HStack>
-          <HStack gap={3} color="smu.darkGray">
-            <HStack gap={1}>
-              <LuStar />
-              <Text>{repository.stars.toLocaleString()}</Text>
+        <a href={repository.htmlUrl} target="_blank" rel="noreferrer">
+          <Text color="smu.blue" fontWeight="bold" truncate>
+            {repository.fullName}
+          </Text>
+          <Text
+            mt={2}
+            minH="42px"
+            color="smu.darkGray"
+            fontSize="sm"
+            lineClamp={2}
+          >
+            {repository.description || "등록된 Repository 설명이 없습니다."}
+          </Text>
+          <HStack mt={4} justifyContent="space-between" fontSize="xs">
+            <HStack gap={1} minW={0}>
+              <Box
+                width="10px"
+                height="10px"
+                flexShrink={0}
+                borderRadius="full"
+                bg={languageColors[repository.language] || "smu.smuGray"}
+              />
+              <Text truncate>{repository.language}</Text>
             </HStack>
-            <HStack gap={1}>
-              <LuGitFork />
-              <Text>{repository.forks.toLocaleString()}</Text>
+            <HStack gap={3} color="smu.darkGray">
+              <HStack gap={1}>
+                <LuStar />
+                <Text>{repository.stars.toLocaleString()}</Text>
+              </HStack>
+              <HStack gap={1}>
+                <LuGitFork />
+                <Text>{repository.forks.toLocaleString()}</Text>
+              </HStack>
             </HStack>
           </HStack>
-        </HStack>
+        </a>
       </Box>
     </Box>
   );
@@ -82,6 +93,7 @@ function RepositoryCard({ repository }: { repository: ITrendingRepository }) {
 
 /** 최신 트렌딩 GitHub Repository를 세 장씩 표시합니다. */
 export default function TrendingRepositoryCarousel() {
+  const sliderRef = useRef<Slider>(null);
   const { data, isLoading, isError } = useQuery({
     queryKey: ["trendingRepositories"],
     queryFn: getTrendingRepositories,
@@ -91,7 +103,6 @@ export default function TrendingRepositoryCarousel() {
 
   return (
     <Box
-      minH="225px"
       p={4}
       borderWidth={1}
       borderColor="smu.gray"
@@ -114,14 +125,42 @@ export default function TrendingRepositoryCarousel() {
           표시할 트렌딩 Repository가 없습니다.
         </Text>
       ) : (
-        <Slider {...sliderSettings}>
-          {repositories.map((repository) => (
-            <RepositoryCard
-              key={repository.githubId}
-              repository={repository}
-            />
-          ))}
-        </Slider>
+        <HStack gap={{ base: 1, md: 2 }}>
+          <IconButton
+            aria-label="이전 트렌딩 Repository 보기"
+            variant="ghost"
+            size="sm"
+            flexShrink={0}
+            color="smu.blue"
+            onClick={() => sliderRef.current?.slickPrev()}
+          >
+            <LuChevronLeft />
+          </IconButton>
+          <Box
+            minW={0}
+            flex={1}
+            css={{ "& .slick-slide": { minHeight: "auto" } }}
+          >
+            <Slider ref={sliderRef} {...sliderSettings}>
+              {repositories.map((repository) => (
+                <RepositoryCard
+                  key={repository.githubId}
+                  repository={repository}
+                />
+              ))}
+            </Slider>
+          </Box>
+          <IconButton
+            aria-label="다음 트렌딩 Repository 보기"
+            variant="ghost"
+            size="sm"
+            flexShrink={0}
+            color="smu.blue"
+            onClick={() => sliderRef.current?.slickNext()}
+          >
+            <LuChevronRight />
+          </IconButton>
+        </HStack>
       )}
     </Box>
   );
