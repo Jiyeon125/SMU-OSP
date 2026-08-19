@@ -31,11 +31,6 @@ class TrendingRepository(CommonModel):
     position = models.PositiveSmallIntegerField()
 
     class Meta:
-        ordering = (
-            "-selection__week_start",
-            "position",
-            "github_id",
-        )
         constraints = [
             models.UniqueConstraint(
                 fields=("selection", "position"),

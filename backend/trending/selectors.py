@@ -53,7 +53,6 @@ def list_recent_github_ids(selected_after: datetime) -> set[int]:
         TrendingRepository.objects.filter(
             selection__created_at__gte=selected_after
         )
-        .order_by()
         .values_list("github_id", flat=True)
     )
 

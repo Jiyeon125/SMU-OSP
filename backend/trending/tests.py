@@ -164,10 +164,10 @@ class TrendingServiceTests(TestCase):
 
         self.assertEqual(
             list(
-                TrendingRepository.objects.values_list(
-                    "github_id",
+                TrendingRepository.objects.order_by(
                     "position",
-                )
+                    "github_id",
+                ).values_list("github_id", "position")
             ),
             [(2, 1), (3, 2), (1, 3)],
         )
