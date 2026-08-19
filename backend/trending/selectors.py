@@ -19,7 +19,12 @@ def list_collection_languages(
     *,
     excluded_languages: set[str],
 ) -> list[str]:
-    """Repository 사용량을 기준으로 이번 수집 언어를 반환한다."""
+    """Repository 사용량 또는 초기 목록에서 수집 언어를 반환한다.
+
+    제외 언어를 제거한 뒤 저장된 언어가 5개 이상이면 bytes 합계 상위
+    5개를 반환한다. 5개 미만이면 부족분을 보충하지 않고 초기 언어
+    목록으로 대체한다.
+    """
     excluded = {language.casefold() for language in excluded_languages}
     language_totals = (
         RepositoryLanguage.objects.values("language")
@@ -59,7 +64,10 @@ def list_recent_github_ids(selected_after: datetime) -> set[int]:
 
 def list_trending_repositories() -> list[TrendingRepository]:
     """가장 최근 선정에 포함된 Repository를 순위대로 조회한다."""
-    latest_selection = TrendingRepositorySelection.objects.values("pk")[:1]
+    latest_selection = (
+        TrendingRepositorySelection.objects.order_by("-week_start")
+        .values("pk")[:1]
+    )
     return list(
         TrendingRepository.objects.filter(
             selection_id=Subquery(latest_selection),

@@ -173,6 +173,64 @@ class TrendingServiceTests(TestCase):
             [(2, 1), (3, 2), (1, 3)],
         )
 
+    @patch("trending.services.list_recent_github_ids")
+    @patch("trending.services.list_collection_languages")
+    @patch("trending.services.search_trending_repositories")
+    def test_collection_reads_next_page_after_recent_candidates(
+        self,
+        search_repositories,
+        list_languages,
+        list_recent_ids,
+    ):
+        list_languages.return_value = ["Python", "JavaScript"]
+        list_recent_ids.return_value = set(range(1, 11))
+
+        def search_side_effect(*, language, page, **_kwargs):
+            if language == "Python" and page == 1:
+                return TrendingRepositorySearchPage(
+                    repositories=tuple(
+                        _candidate(index, stars=5000 - index)
+                        for index in range(1, 11)
+                    ),
+                    has_next=True,
+                )
+            if language == "Python" and page == 2:
+                return TrendingRepositorySearchPage(
+                    repositories=(_candidate(11, stars=3000),),
+                    has_next=False,
+                )
+            return TrendingRepositorySearchPage(
+                repositories=tuple(
+                    _candidate(
+                        index,
+                        language="JavaScript",
+                        stars=2500 - index,
+                    )
+                    for index in range(20, 30)
+                ),
+                has_next=False,
+            )
+
+        search_repositories.side_effect = search_side_effect
+
+        collect_trending_repositories(collected_at=self.collected_at)
+
+        self.assertEqual(
+            list(
+                TrendingRepository.objects.order_by("position").values_list(
+                    "github_id",
+                    flat=True,
+                )
+            ),
+            [11, *range(20, 29)],
+        )
+        search_repositories.assert_any_call(
+            language="Python",
+            created_after="2026-02-18",
+            page=2,
+            per_page=10,
+        )
+
     @patch("trending.services.list_collection_languages")
     @patch("trending.services.search_trending_repositories")
     def test_partial_github_failure_keeps_previous_results(

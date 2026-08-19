@@ -78,7 +78,7 @@ function RepositoryCard({ repository }: { repository: TrendingRepository }) {
     );
 }
 
-/** 최신 트렌딩 GitHub Repository를 세 장씩 표시합니다. */
+/** 최신 트렌딩 Repository를 화면 너비에 따라 한 장에서 세 장씩 표시합니다. */
 export default function TrendingRepositoryCarousel() {
     const sliderRef = useRef<Slider>(null);
     const { data, isLoading, isError } = useQuery({
