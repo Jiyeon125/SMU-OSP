@@ -1,4 +1,4 @@
-import { Box, Grid, GridItem, Text, VStack } from "@chakra-ui/react";
+import { Grid, GridItem, VStack } from "@chakra-ui/react";
 import { useQuery } from "@tanstack/react-query";
 import Carousel from "../components/Carousel";
 import { getCarouselPosts, getPosts } from "../api";
@@ -6,6 +6,7 @@ import { IPost } from "../types";
 import RecentPostList from "../components/RecentPostList";
 import MainUserList from "../components/MainUserList";
 import MainProjectList from "../components/MainProjectList";
+import TrendingRepositoryCarousel from "../components/TrendingRepositoryCarousel";
 
 /** 서비스의 주요 공지와 사용자·프로젝트 현황을 표시합니다. */
 export default function Home() {
@@ -45,21 +46,7 @@ export default function Home() {
         </GridItem>
       </Grid>
 
-      <Box
-        minH="150px"
-        p={4}
-        borderWidth={1}
-        borderColor="smu.gray"
-        borderRadius="lg"
-        bg="white"
-      >
-        <Text fontSize="lg" fontWeight="bold" color="smu.blue">
-          트렌딩 GitHub Repository
-        </Text>
-        <Text mt={8} textAlign="center" color="smu.darkGray" fontSize="sm">
-          트렌딩 Repository 기능 준비 중입니다.
-        </Text>
-      </Box>
+      <TrendingRepositoryCarousel />
 
       <Grid templateColumns={{ base: "1fr", lg: "1fr 1fr" }} gap={5}>
         <MainUserList />

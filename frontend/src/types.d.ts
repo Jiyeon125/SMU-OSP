@@ -20,6 +20,21 @@ export interface IPublicUser {
 
 export type PublicUserListResponse = ApiSuccess<IPublicUser[], PaginationDetail>;
 
+export interface ITrendingRepository {
+  githubId: number;
+  fullName: string;
+  htmlUrl: string;
+  description: string | null;
+  language: string;
+  stars: number;
+  forks: number;
+}
+
+export type TrendingRepositoryListResponse = ApiSuccess<
+  ITrendingRepository[],
+  null
+>;
+
 export interface IPost {
   id: number;
   title: string;

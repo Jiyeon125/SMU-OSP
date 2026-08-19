@@ -1,6 +1,11 @@
 import Cookie from "js-cookie";
 import axios from "axios";
-import { ILogin, IUser, PublicUserListResponse } from "./types";
+import {
+    ILogin,
+    IUser,
+    PublicUserListResponse,
+    TrendingRepositoryListResponse,
+} from "./types";
 import type {
     ProjectInput,
     ProjectMemberUpdateInput,
@@ -62,6 +67,11 @@ export const getPostCount = () => instance.get("posts/count").then((response) =>
 
 export const getCarouselPosts = () =>
     instance.get("posts?carousel").then((response) => response.data);
+
+export const getTrendingRepositories = () =>
+    instance
+        .get<TrendingRepositoryListResponse>("trending/repositories")
+        .then((response) => response.data);
 
 export const getProjects = ({
     start = null,
