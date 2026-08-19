@@ -60,6 +60,24 @@ class TrendingGitHubClientTests(TestCase):
         self.assertEqual(params["sort"], "stars")
         self.assertEqual(params["order"], "desc")
 
+    @patch("trending.github_client.requests.get")
+    def test_search_rejects_incomplete_results(self, request_get):
+        response = request_get.return_value
+        response.status_code = 200
+        response.json.return_value = {
+            "total_count": 1,
+            "incomplete_results": True,
+            "items": [],
+        }
+
+        with self.assertRaises(GitHubSearchError):
+            search_trending_repositories(
+                language="Python",
+                created_after="2026-02-19",
+                page=1,
+                per_page=10,
+            )
+
 
 @override_settings(TRENDING_EXCLUDED_LANGUAGES=[])
 class TrendingServiceTests(TestCase):

@@ -1,11 +1,6 @@
 import Cookie from "js-cookie";
 import axios from "axios";
-import {
-    ILogin,
-    IUser,
-    PublicUserListResponse,
-    TrendingRepositoryListResponse,
-} from "./types";
+import { ILogin, IUser, PublicUserListResponse, TrendingRepositoryListResponse } from "./types";
 import type {
     ProjectInput,
     ProjectMemberUpdateInput,
