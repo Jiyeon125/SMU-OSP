@@ -111,6 +111,42 @@ class TrendingServiceTests(TestCase):
 
     @patch("trending.services.list_collection_languages")
     @patch("trending.services.search_trending_repositories")
+    def test_collection_orders_candidates_by_stars_across_languages(
+        self,
+        search_repositories,
+        list_languages,
+    ):
+        list_languages.return_value = ["Python", "JavaScript"]
+        search_repositories.side_effect = [
+            TrendingRepositorySearchPage(
+                repositories=(
+                    _candidate(1, stars=1500),
+                    _candidate(2, stars=3000),
+                ),
+                has_next=False,
+            ),
+            TrendingRepositorySearchPage(
+                repositories=(
+                    _candidate(3, language="JavaScript", stars=2500),
+                ),
+                has_next=False,
+            ),
+        ]
+
+        collect_trending_repositories(collected_at=self.collected_at)
+
+        self.assertEqual(
+            list(
+                TrendingRepository.objects.values_list(
+                    "github_id",
+                    "position",
+                )
+            ),
+            [(2, 1), (3, 2), (1, 3)],
+        )
+
+    @patch("trending.services.list_collection_languages")
+    @patch("trending.services.search_trending_repositories")
     def test_partial_github_failure_keeps_previous_results(
         self,
         search_repositories,
