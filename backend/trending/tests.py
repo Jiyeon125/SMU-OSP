@@ -10,6 +10,7 @@ from .github_client import (
     GitHubSearchError,
     TrendingRepositoryCandidate,
     TrendingRepositorySearchPage,
+    search_trending_repositories,
 )
 from .models import TrendingRepository, TrendingRepositorySelection
 from .selectors import INITIAL_LANGUAGES, list_collection_languages
@@ -31,6 +32,32 @@ def _candidate(
         stars=stars if stars is not None else 2000 - github_id,
         forks=github_id,
     )
+
+
+class TrendingGitHubClientTests(TestCase):
+    @patch("trending.github_client.requests.get")
+    def test_search_uses_confirmed_repository_filters(self, request_get):
+        response = request_get.return_value
+        response.status_code = 200
+        response.json.return_value = {
+            "total_count": 0,
+            "incomplete_results": False,
+            "items": [],
+        }
+
+        search_trending_repositories(
+            language="Python",
+            created_after="2026-02-19",
+            page=1,
+        )
+
+        params = request_get.call_args.kwargs["params"]
+        self.assertEqual(
+            params["q"],
+            "created:>=2026-02-19 stars:>=1000 language:Python is:public",
+        )
+        self.assertEqual(params["sort"], "stars")
+        self.assertEqual(params["order"], "desc")
 
 
 @override_settings(TRENDING_EXCLUDED_LANGUAGES=[])
