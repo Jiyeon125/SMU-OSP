@@ -14,8 +14,10 @@ import type { ITrendingRepository } from "../types";
 const sliderSettings = {
   dots: false,
   arrows: false,
-  infinite: true,
   speed: 400,
+  autoplaySpeed: 5000,
+  pauseOnFocus: true,
+  pauseOnHover: true,
   slidesToShow: 3,
   slidesToScroll: 1,
   responsive: [
@@ -100,6 +102,7 @@ export default function TrendingRepositoryCarousel() {
     staleTime: 60 * 60 * 1000,
   });
   const repositories = data?.data ?? [];
+  const canRotate = repositories.length > sliderSettings.slidesToShow;
 
   return (
     <Box
@@ -141,7 +144,12 @@ export default function TrendingRepositoryCarousel() {
             flex={1}
             css={{ "& .slick-slide": { minHeight: "auto" } }}
           >
-            <Slider ref={sliderRef} {...sliderSettings}>
+            <Slider
+              ref={sliderRef}
+              {...sliderSettings}
+              infinite={canRotate}
+              autoplay={canRotate}
+            >
               {repositories.map((repository) => (
                 <RepositoryCard
                   key={repository.githubId}
