@@ -20,6 +20,72 @@ class TrendingRepositoryCandidate:
     stars: int
     forks: int
 
+    @classmethod
+    def from_data(
+        cls,
+        data: object,
+        *,
+        requested_language: str,
+    ) -> "TrendingRepositoryCandidate":
+        """GitHub 검색 항목을 검증해 선정 후보로 변환한다.
+
+        GitHub가 language를 null로 반환하면 검색에 사용한 언어를 적용한다.
+        정수 필드는 bool을 허용하지 않고 정확한 int 값만 허용한다.
+
+        Raises:
+            GitHubSearchError: 필수 필드가 없거나 형식이 잘못된 경우.
+        """
+        if not isinstance(data, dict):
+            raise GitHubSearchError(
+                "GitHub 검색 응답 형식이 올바르지 않습니다."
+            )
+        github_id = data.get("id")
+        full_name = data.get("full_name")
+        html_url = data.get("html_url")
+        description = data.get("description")
+        language = data.get("language")
+        stars = data.get("stargazers_count")
+        forks = data.get("forks_count")
+        if (
+            type(github_id) is not int
+            or not isinstance(full_name, str)
+            or not full_name
+            or not isinstance(html_url, str)
+            or not html_url
+        ):
+            raise GitHubSearchError(
+                "GitHub 검색 응답 형식이 올바르지 않습니다."
+            )
+        if (
+            description is not None
+            and not isinstance(description, str)
+        ) or (
+            language is not None
+            and not isinstance(language, str)
+        ):
+            raise GitHubSearchError(
+                "GitHub 검색 응답 형식이 올바르지 않습니다."
+            )
+        # bool은 int의 하위 타입이므로 수치 필드는 정확한 int만 허용한다.
+        if (
+            type(stars) is not int
+            or stars < 0
+            or type(forks) is not int
+            or forks < 0
+        ):
+            raise GitHubSearchError(
+                "GitHub 검색 응답 형식이 올바르지 않습니다."
+            )
+        return cls(
+            github_id=github_id,
+            full_name=full_name,
+            html_url=html_url,
+            description=description,
+            language=language or requested_language,
+            stars=stars,
+            forks=forks,
+        )
+
 
 @dataclass(frozen=True)
 class TrendingRepositorySearchPage:
@@ -27,6 +93,49 @@ class TrendingRepositorySearchPage:
 
     repositories: tuple[TrendingRepositoryCandidate, ...]
     has_next: bool
+
+    @classmethod
+    def from_data(
+        cls,
+        data: object,
+        *,
+        requested_language: str,
+        page: int,
+        per_page: int,
+    ) -> "TrendingRepositorySearchPage":
+        """GitHub 검색 응답을 검증해 검색 페이지로 변환한다.
+
+        Raises:
+            GitHubSearchError: 검색 결과가 불완전하거나 형식이 잘못된 경우.
+        """
+        if not isinstance(data, dict):
+            raise GitHubSearchError(
+                "GitHub 검색 응답 형식이 올바르지 않습니다."
+            )
+        total_count = data.get("total_count")
+        incomplete_results = data.get("incomplete_results")
+        items = data.get("items")
+        if (
+            type(total_count) is not int
+            or total_count < 0
+            or incomplete_results is not False
+            or not isinstance(items, list)
+        ):
+            raise GitHubSearchError(
+                "GitHub 검색 결과가 완전하지 않습니다."
+            )
+        repositories = tuple(
+            TrendingRepositoryCandidate.from_data(
+                item,
+                requested_language=requested_language,
+            )
+            for item in items
+        )
+        searchable_count = min(total_count, 1000)
+        return cls(
+            repositories=repositories,
+            has_next=page * per_page < searchable_count,
+        )
 
 
 def _headers() -> dict[str, str]:
@@ -38,64 +147,6 @@ def _headers() -> dict[str, str]:
     if token and not token.startswith("dummy"):
         headers["Authorization"] = f"Bearer {token}"
     return headers
-
-
-def _parse_repository(
-    raw_repository: object,
-    *,
-    requested_language: str,
-) -> TrendingRepositoryCandidate:
-    """GitHub 검색 항목을 검증해 선정 후보로 변환한다.
-
-    GitHub가 language를 null로 반환하면 검색에 사용한 언어를 적용한다.
-    정수 필드는 bool을 허용하지 않고 정확한 int 값만 허용한다.
-
-    Raises:
-        GitHubSearchError: 필수 필드가 없거나 형식이 잘못된 경우.
-    """
-    if not isinstance(raw_repository, dict):
-        raise GitHubSearchError("GitHub 검색 응답 형식이 올바르지 않습니다.")
-    repository = raw_repository
-    github_id = repository.get("id")
-    full_name = repository.get("full_name")
-    html_url = repository.get("html_url")
-    description = repository.get("description")
-    language = repository.get("language")
-    stars = repository.get("stargazers_count")
-    forks = repository.get("forks_count")
-    if (
-        type(github_id) is not int
-        or not isinstance(full_name, str)
-        or not full_name
-        or not isinstance(html_url, str)
-        or not html_url
-    ):
-        raise GitHubSearchError("GitHub 검색 응답 형식이 올바르지 않습니다.")
-    if (
-        description is not None
-        and not isinstance(description, str)
-    ) or (
-        language is not None
-        and not isinstance(language, str)
-    ):
-        raise GitHubSearchError("GitHub 검색 응답 형식이 올바르지 않습니다.")
-    # bool은 int의 하위 타입이므로 GitHub 수치 필드는 정확한 int만 허용한다.
-    if (
-        type(stars) is not int
-        or stars < 0
-        or type(forks) is not int
-        or forks < 0
-    ):
-        raise GitHubSearchError("GitHub 검색 응답 형식이 올바르지 않습니다.")
-    return TrendingRepositoryCandidate(
-        github_id=github_id,
-        full_name=full_name,
-        html_url=html_url,
-        description=description,
-        language=language or requested_language,
-        stars=stars,
-        forks=forks,
-    )
 
 
 def search_trending_repositories(
@@ -146,24 +197,9 @@ def search_trending_repositories(
         raise GitHubSearchError(
             "GitHub 검색 응답을 해석하지 못했습니다."
         ) from exc
-    if not isinstance(data, dict):
-        raise GitHubSearchError("GitHub 검색 응답 형식이 올바르지 않습니다.")
-    total_count = data.get("total_count")
-    incomplete_results = data.get("incomplete_results")
-    items = data.get("items")
-    if (
-        type(total_count) is not int
-        or total_count < 0
-        or incomplete_results is not False
-        or not isinstance(items, list)
-    ):
-        raise GitHubSearchError("GitHub 검색 결과가 완전하지 않습니다.")
-    repositories = tuple(
-        _parse_repository(item, requested_language=language)
-        for item in items
-    )
-    searchable_count = min(total_count, 1000)
-    return TrendingRepositorySearchPage(
-        repositories=repositories,
-        has_next=page * per_page < searchable_count,
+    return TrendingRepositorySearchPage.from_data(
+        data,
+        requested_language=language,
+        page=page,
+        per_page=per_page,
     )
