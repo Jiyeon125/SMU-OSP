@@ -1,9 +1,7 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, transaction
-from django.db.models import Exists, OuterRef, QuerySet
 
 from users.models import User
 
@@ -241,70 +239,6 @@ def create_project(
     )
 
 
-def _actor_leader_membership_queryset(*, actor_id: int) -> QuerySet[Member]:
-    """요청자가 JOINED 팀장인지 판정하는 Exists용 QuerySet을 만든다.
-
-    Args:
-        actor_id: 팀장 여부를 확인할 사용자 ID.
-
-    Returns:
-        바깥 Project 행과 연결된 JOINED 팀장 멤버십 QuerySet.
-    """
-    return Member.objects.filter(
-        project_id=OuterRef("pk"),
-        user_id=actor_id,
-        is_leader=True,
-        status=Member.Status.JOINED,
-    )
-
-
-def _get_visible_project_for_actor(
-    *,
-    project_id: int,
-    actor: User,
-    for_update: bool = False,
-) -> Project:
-    """삭제되지 않은 프로젝트에 요청자 팀장 여부를 붙여 조회한다.
-
-    Args:
-        project_id: 조회할 프로젝트 ID.
-        actor: 팀장 여부를 확인할 사용자.
-        for_update: 참이면 조회한 프로젝트 행을 잠근다.
-
-    Returns:
-        요청자의 팀장 여부가 annotation된 프로젝트.
-
-    Raises:
-        Project.DoesNotExist: 프로젝트가 없거나 삭제된 경우.
-    """
-    queryset = Project.objects.exclude(
-        status=Project.Status.DELETED,
-    ).annotate(
-        actor_is_leader=Exists(
-            _actor_leader_membership_queryset(actor_id=actor.pk)
-        )
-    )
-    if for_update:
-        queryset = queryset.select_for_update()
-    return queryset.get(pk=project_id)
-
-
-def _require_actor_is_leader(project: Project) -> None:
-    """요청자가 해당 프로젝트 팀장인지 확인하고 아니면 거부한다.
-
-    멤버 관리 쓰기 권한의 공통 판정이다. 조기 거절과 Service 잠금 후
-    재확인이 같은 규칙·메시지를 쓰도록 여기에만 둔다.
-
-    Args:
-        project: 요청자의 팀장 여부가 annotation된 프로젝트.
-
-    Raises:
-        PermissionDenied: 요청자가 참여 중인 팀장이 아닌 경우.
-    """
-    if not getattr(project, "actor_is_leader", False):
-        raise PermissionDenied("프로젝트 리더만 멤버 상태를 변경할 수 있습니다.")
-
-
 def create_membership_application(
     *,
     actor: User,
@@ -430,56 +364,21 @@ def cancel_or_leave_membership(
         )
 
 
-def get_project_member_management_target(
-    *,
-    actor: User,
-    project_id: int,
-) -> Project:
-    """멤버 상태 변경 입력 검증 전에 프로젝트와 팀장 권한을 확인한다.
-
-    입력 검증보다 앞선 조기 거절용이다. 권한의 기준(최종 차단)은
-    `change_project_member_status()`의 잠금 후 재확인이다.
-
-    Args:
-        actor: 멤버 상태 변경을 요청한 사용자.
-        project_id: 대상 프로젝트 ID.
-
-    Returns:
-        요청자의 팀장 여부가 확인된 프로젝트.
-
-    Raises:
-        Project.DoesNotExist: 프로젝트가 없거나 삭제된 경우.
-        PermissionDenied: 요청자가 팀장이 아닌 경우.
-    """
-    project = _get_visible_project_for_actor(
-        project_id=project_id,
-        actor=actor,
-    )
-    _require_actor_is_leader(project)
-    return project
-
-
 def change_project_member_status(
     *,
-    actor: User,
     project_id: int,
     member_id: int,
     next_status: str,
     description: str | None,
     update_description: bool,
 ) -> None:
-    """팀장이 프로젝트 멤버의 상태를 변경한다.
-
-    권한 검증의 기준(최종 차단)은 이 함수다. View의
-    `get_project_member_management_target()`은 입력 검증 전 조기 거절용이며,
-    잠금 획득 후 여기서 같은 규칙으로 팀장 여부를 다시 확인한다.
+    """프로젝트 멤버의 상태를 잠금 구간에서 변경한다.
 
     Project를 먼저 잠근 뒤 대상 Member를 잠가 승인 시 정원 검사와 상태
     변경이 같은 트랜잭션에서 수행되도록 한다. Member에는 잠긴 Project
     인스턴스를 연결해 정원 검사 중 관계를 다시 조회하지 않는다.
 
     Args:
-        actor: 멤버 상태 변경을 요청한 사용자.
         project_id: 대상 프로젝트 ID.
         member_id: 상태를 변경할 멤버십 ID.
         next_status: 변경할 멤버 상태.
@@ -489,17 +388,14 @@ def change_project_member_status(
     Raises:
         Project.DoesNotExist: 프로젝트가 없거나 삭제된 경우.
         Member.DoesNotExist: 변경 가능한 일반 멤버가 존재하지 않는 경우.
-        PermissionDenied: 요청자가 팀장이 아닌 경우.
         ValidationError: 상태 전이 조건을 만족하지 않는 경우.
     """
     with transaction.atomic():
-        project = _get_visible_project_for_actor(
-            project_id=project_id,
-            actor=actor,
-            for_update=True,
+        project = (
+            Project.objects.exclude(status=Project.Status.DELETED)
+            .select_for_update()
+            .get(pk=project_id)
         )
-        _require_actor_is_leader(project)
-
         member = (
             Member.objects.select_for_update()
             .get(project_id=project_id, pk=member_id, is_leader=False)

@@ -47,14 +47,15 @@ from .serializers import (
 from .services import (
     ProjectCreationError,
     RepositoryRegistrationError,
-    change_project_member_status,
-    create_project,
     cancel_or_leave_membership,
+    change_project_member_status,
     create_membership_application,
+    create_project,
     get_membership_cancel_target,
     prepare_project_repository_update,
     update_project_repository,
 )
+
 PROJECT_NOT_FOUND_MESSAGE = (
     "요청한 프로젝트가 없거나 삭제되었을 수 있습니다."
 )
@@ -515,7 +516,7 @@ class ProjectMembers(APIView):
             return Response(
                 fail(
                     "PROJECT_NOT_FOUND",
-                    f"id={pk}에 해당하는 프로젝트를 찾을 수 없습니다.",
+                    PROJECT_NOT_FOUND_MESSAGE,
                     status.HTTP_404_NOT_FOUND,
                 ),
                 status=status.HTTP_404_NOT_FOUND,
@@ -571,7 +572,6 @@ class ProjectMemberDetail(APIView):
             serializer = ProjectMemberUpdateSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
             change_project_member_status(
-                actor=request.user,
                 project_id=pk,
                 member_id=member_id,
                 next_status=serializer.validated_data["status"],
@@ -624,7 +624,15 @@ class ProjectMemberDetail(APIView):
         return Response(success(None), status=status.HTTP_200_OK)
 
 
-def first_serializer_error(errors):
+def first_serializer_error(errors: object) -> str:
+    """중첩된 Serializer 오류에서 첫 사용자 메시지를 반환한다.
+
+    Args:
+        errors: Serializer가 반환한 오류 상세 구조.
+
+    Returns:
+        첫 번째 오류 문자열 또는 기본 입력 오류 메시지.
+    """
     if isinstance(errors, dict):
         first_value = next(iter(errors.values()), None)
         if isinstance(first_value, list) and first_value:
