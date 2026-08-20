@@ -294,7 +294,7 @@ class TrendingServiceTests(TestCase):
             language="Python",
             created_after="2026-02-18",
             page=2,
-            per_page=10,
+            per_page=100,
         )
 
     @patch("trending.services.list_collection_languages")
