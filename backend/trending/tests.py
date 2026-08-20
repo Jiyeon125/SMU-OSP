@@ -13,8 +13,11 @@ from .github_client import (
     search_trending_repositories,
 )
 from .models import TrendingRepository, TrendingRepositorySelection
-from .selectors import INITIAL_LANGUAGES, list_collection_languages
-from .services import collect_trending_repositories
+from .services import (
+    INITIAL_LANGUAGES,
+    collect_trending_repositories,
+    list_collection_languages,
+)
 
 
 def _candidate(
@@ -119,6 +122,33 @@ class TrendingServiceTests(TestCase):
         )
 
         self.assertEqual(languages, ["Ruby", "Rust", "Go", "Java", "Python"])
+
+    def test_repository_languages_are_completed_with_initial_languages(self):
+        project = Project.objects.create(name="Project", description="Test")
+        repository = Repository.objects.create(
+            project=project,
+            github_id=1,
+            name="repository",
+            full_name="owner/repository",
+            html_url="https://github.com/owner/repository",
+        )
+        RepositoryLanguage.objects.create(
+            repository=repository,
+            language="Go",
+            bytes=200,
+        )
+        RepositoryLanguage.objects.create(
+            repository=repository,
+            language="Python",
+            bytes=100,
+        )
+
+        languages = list_collection_languages(excluded_languages=set())
+
+        self.assertEqual(
+            languages,
+            ["Go", "Python", "JavaScript", "TypeScript", "Java"],
+        )
 
     @patch("trending.services.list_collection_languages")
     @patch("trending.services.search_trending_repositories")

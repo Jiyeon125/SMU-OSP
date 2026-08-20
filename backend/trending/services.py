@@ -10,13 +10,21 @@ from .github_client import (
 from .models import TrendingRepository, TrendingRepositorySelection
 from .selectors import (
     has_successful_selection,
-    list_collection_languages,
     list_recent_github_ids,
+    list_repository_languages_by_usage,
 )
 
 COLLECTION_LIMIT = 10
+COLLECTION_LANGUAGE_LIMIT = 5
 SEARCH_PAGE_SIZE = 10
 RETENTION_DAYS = 180
+INITIAL_LANGUAGES = (
+    "Python",
+    "JavaScript",
+    "TypeScript",
+    "Java",
+    "C++",
+)
 
 
 def _week_start(target: datetime) -> date:
@@ -29,6 +37,29 @@ def _excluded_languages() -> set[str]:
         for language in settings.TRENDING_EXCLUDED_LANGUAGES
         if language.strip()
     }
+
+
+def list_collection_languages(
+    *,
+    excluded_languages: set[str],
+) -> list[str]:
+    """상위 Repository 언어를 우선하고 부족분을 초기 언어로 채운다."""
+    excluded = {language.casefold() for language in excluded_languages}
+    selected: list[str] = []
+    selected_names: set[str] = set()
+    languages = (
+        *list_repository_languages_by_usage(),
+        *INITIAL_LANGUAGES,
+    )
+    for language in languages:
+        normalized = language.casefold()
+        if normalized in excluded or normalized in selected_names:
+            continue
+        selected.append(language)
+        selected_names.add(normalized)
+        if len(selected) == COLLECTION_LANGUAGE_LIMIT:
+            break
+    return selected
 
 
 def _select_candidates(

@@ -6,43 +6,15 @@ from projects.models import RepositoryLanguage
 
 from .models import TrendingRepository, TrendingRepositorySelection
 
-INITIAL_LANGUAGES = (
-    "Python",
-    "JavaScript",
-    "TypeScript",
-    "Java",
-    "C++",
-)
 
-
-def list_collection_languages(
-    *,
-    excluded_languages: set[str],
-) -> list[str]:
-    """Repository 사용량 또는 초기 목록에서 수집 언어를 반환한다.
-
-    제외 언어를 제거한 뒤 저장된 언어가 5개 이상이면 bytes 합계 상위
-    5개를 반환한다. 5개 미만이면 부족분을 보충하지 않고 초기 언어
-    목록으로 대체한다.
-    """
-    excluded = {language.casefold() for language in excluded_languages}
+def list_repository_languages_by_usage() -> list[str]:
+    """Repository 언어를 bytes 합계 내림차순으로 조회한다."""
     language_totals = (
         RepositoryLanguage.objects.values("language")
         .annotate(total_bytes=Sum("bytes"))
         .order_by("-total_bytes", "language")
     )
-    available = [
-        item["language"]
-        for item in language_totals
-        if item["language"].casefold() not in excluded
-    ]
-    if len(available) >= 5:
-        return available[:5]
-    return [
-        language
-        for language in INITIAL_LANGUAGES
-        if language.casefold() not in excluded
-    ]
+    return [item["language"] for item in language_totals]
 
 
 def has_successful_selection(week_start: date) -> bool:
