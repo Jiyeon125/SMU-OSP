@@ -39,7 +39,9 @@ def _candidate(
 
 class TrendingGitHubClientTests(TestCase):
     @patch("trending.github_client.requests.get")
-    def test_search_uses_confirmed_repository_filters(self, request_get):
+    def test_search_quotes_language_and_uses_confirmed_filters(
+        self, request_get
+    ):
         response = request_get.return_value
         response.status_code = 200
         response.json.return_value = {
@@ -49,7 +51,7 @@ class TrendingGitHubClientTests(TestCase):
         }
 
         search_trending_repositories(
-            language="Python",
+            language="Jupyter Notebook",
             created_after="2026-02-19",
             page=1,
             per_page=10,
@@ -58,7 +60,8 @@ class TrendingGitHubClientTests(TestCase):
         params = request_get.call_args.kwargs["params"]
         self.assertEqual(
             params["q"],
-            "created:>=2026-02-19 stars:>=1000 language:Python is:public",
+            "created:>=2026-02-19 stars:>=1000 "
+            'language:"Jupyter Notebook" is:public',
         )
         self.assertEqual(params["sort"], "stars")
         self.assertEqual(params["order"], "desc")
@@ -90,6 +93,62 @@ class TrendingGitHubClientTests(TestCase):
             "incomplete_results": False,
             "items": [{"id": "invalid"}],
         }
+
+        with self.assertRaises(GitHubSearchError):
+            search_trending_repositories(
+                language="Python",
+                created_after="2026-02-19",
+                page=1,
+                per_page=10,
+            )
+
+    def test_candidate_rejects_invalid_numeric_fields(self):
+        valid_data = {
+            "id": 1,
+            "full_name": "owner/repository",
+            "html_url": "https://github.com/owner/repository",
+            "description": None,
+            "language": "Python",
+            "stargazers_count": 1000,
+            "forks_count": 10,
+        }
+        invalid_values = (
+            ("id", True),
+            ("stargazers_count", True),
+            ("forks_count", True),
+            ("stargazers_count", -1),
+            ("forks_count", -1),
+        )
+
+        for field, value in invalid_values:
+            with (
+                self.subTest(field=field, value=value),
+                self.assertRaises(GitHubSearchError),
+            ):
+                TrendingRepositoryCandidate.from_data(
+                    {**valid_data, field: value},
+                    requested_language="Python",
+                )
+
+    def test_candidate_uses_requested_language_when_language_is_null(self):
+        candidate = TrendingRepositoryCandidate.from_data(
+            {
+                "id": 1,
+                "full_name": "owner/repository",
+                "html_url": "https://github.com/owner/repository",
+                "description": None,
+                "language": None,
+                "stargazers_count": 1000,
+                "forks_count": 10,
+            },
+            requested_language="Jupyter Notebook",
+        )
+
+        self.assertEqual(candidate.language, "Jupyter Notebook")
+
+    @patch("trending.github_client.requests.get")
+    def test_search_rejects_http_error(self, request_get):
+        request_get.return_value.status_code = 500
 
         with self.assertRaises(GitHubSearchError):
             search_trending_repositories(
@@ -339,6 +398,45 @@ class TrendingServiceTests(TestCase):
                 )
             ),
             [100],
+        )
+
+    @patch("trending.services.list_collection_languages")
+    @patch("trending.services.search_trending_repositories")
+    def test_collection_deletes_only_expired_selections(
+        self,
+        search_repositories,
+        list_languages,
+    ):
+        expired_selection = TrendingRepositorySelection.objects.create(
+            week_start=self.collected_at.date() - timedelta(days=189)
+        )
+        recent_selection = TrendingRepositorySelection.objects.create(
+            week_start=self.collected_at.date() - timedelta(days=7)
+        )
+        selected_after = self.collected_at - timedelta(days=180)
+        TrendingRepositorySelection.objects.filter(
+            pk=expired_selection.pk
+        ).update(created_at=selected_after - timedelta(seconds=1))
+        TrendingRepositorySelection.objects.filter(
+            pk=recent_selection.pk
+        ).update(created_at=selected_after)
+        list_languages.return_value = ["Python"]
+        search_repositories.return_value = TrendingRepositorySearchPage(
+            repositories=(),
+            has_next=False,
+        )
+
+        collect_trending_repositories(collected_at=self.collected_at)
+
+        self.assertFalse(
+            TrendingRepositorySelection.objects.filter(
+                pk=expired_selection.pk
+            ).exists()
+        )
+        self.assertTrue(
+            TrendingRepositorySelection.objects.filter(
+                pk=recent_selection.pk
+            ).exists()
         )
 
 

@@ -176,7 +176,7 @@ def search_trending_repositories(
             params={
                 "q": (
                     f"created:>={created_after} stars:>=1000 "
-                    f"language:{language} is:public"
+                    f'language:"{language}" is:public'
                 ),
                 "sort": "stars",
                 "order": "desc",
