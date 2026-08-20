@@ -11,10 +11,8 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
 from pathlib import Path
-from datetime import timedelta
 
 import environ
-
 import pymysql
 from celery.schedules import crontab
 
@@ -55,6 +53,7 @@ CUSTOM_APPS = [
     "teams.apps.TeamsConfig",
     "projects.apps.ProjectsConfig",
     "rankings.apps.RankingsConfig",
+    "trending.apps.TrendingConfig",
 ]
 
 SYSTEM_APPS = [
@@ -112,6 +111,7 @@ DATABASES = {
         "PASSWORD": env("DB_PASSWORD"),
         "HOST": env("DB_HOST"),
         "PORT": env("DB_PORT"),
+        "OPTIONS": {"charset": "utf8mb4"},
     }
 }
 
@@ -213,6 +213,10 @@ REPOSITORY_REFRESH_TASK_RATE_LIMIT = env(
     "REPOSITORY_REFRESH_TASK_RATE_LIMIT",
     default="10/m",
 )
+TRENDING_EXCLUDED_LANGUAGES = env.list(
+    "TRENDING_EXCLUDED_LANGUAGES",
+    default=["HTML", "CSS", "Markdown", "Shell"],
+)
 
 CELERY_BEAT_SCHEDULE = {
     "daily-update": {
@@ -226,6 +230,10 @@ CELERY_BEAT_SCHEDULE = {
     "project-ranking": {
         "task": "rankings.tasks.calculate_daily_project_rankings",
         "schedule": crontab(minute="0", hour="6"),
+    },
+    "trending-repositories": {
+        "task": "trending.tasks.collect_daily_trending_repositories",
+        "schedule": crontab(minute="0", hour="0"),
     },
 }
 
