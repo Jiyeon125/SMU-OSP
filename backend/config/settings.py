@@ -215,7 +215,7 @@ REPOSITORY_REFRESH_TASK_RATE_LIMIT = env(
 )
 TRENDING_EXCLUDED_LANGUAGES = env.list(
     "TRENDING_EXCLUDED_LANGUAGES",
-    default=[],
+    default=["HTML", "CSS", "Markdown", "Shell"],
 )
 
 CELERY_BEAT_SCHEDULE = {
