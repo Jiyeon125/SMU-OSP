@@ -3,6 +3,7 @@ from datetime import date, datetime, timedelta
 from django.conf import settings
 from django.db import transaction
 
+from .constants import TRENDING_REPOSITORY_LIMIT
 from .github_client import (
     TrendingRepositoryCandidate,
     search_trending_repositories,
@@ -14,7 +15,6 @@ from .selectors import (
     list_repository_languages_by_usage,
 )
 
-COLLECTION_LIMIT = 10
 COLLECTION_LANGUAGE_LIMIT = 5
 SEARCH_PAGE_SIZE = 100
 RETENTION_DAYS = 180
@@ -80,7 +80,7 @@ def _select_candidates(
             continue
         selected.append(candidate)
         selected_github_ids.add(candidate.github_id)
-        if len(selected) == COLLECTION_LIMIT:
+        if len(selected) == TRENDING_REPOSITORY_LIMIT:
             break
     return selected
 
@@ -99,7 +99,7 @@ def _collect_language_candidates(
     candidates: list[TrendingRepositoryCandidate] = []
     candidate_github_ids: set[int] = set()
     page = 1
-    while len(candidates) < COLLECTION_LIMIT:
+    while len(candidates) < TRENDING_REPOSITORY_LIMIT:
         result = search_trending_repositories(
             language=language,
             created_after=created_after,
@@ -114,7 +114,7 @@ def _collect_language_candidates(
                 continue
             candidates.append(candidate)
             candidate_github_ids.add(candidate.github_id)
-            if len(candidates) == COLLECTION_LIMIT:
+            if len(candidates) == TRENDING_REPOSITORY_LIMIT:
                 break
         if not result.has_next:
             break

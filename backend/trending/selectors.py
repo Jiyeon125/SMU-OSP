@@ -4,6 +4,7 @@ from django.db.models import Subquery, Sum
 
 from projects.models import RepositoryLanguage
 
+from .constants import TRENDING_REPOSITORY_LIMIT
 from .models import TrendingRepository, TrendingRepositorySelection
 
 
@@ -43,5 +44,5 @@ def list_trending_repositories() -> list[TrendingRepository]:
     return list(
         TrendingRepository.objects.filter(
             selection_id=Subquery(latest_selection),
-        ).order_by("position", "github_id")[:10]
+        ).order_by("position", "github_id")[:TRENDING_REPOSITORY_LIMIT]
     )
