@@ -26,7 +26,6 @@ from .services import (
     calculate_project_rankings,
     calculate_user_rankings,
     replace_daily_rankings,
-    replace_project_rankings,
 )
 from .tasks import _months_before, calculate_daily_project_rankings
 
@@ -341,7 +340,7 @@ class ProjectRankingApiTests(TestCase):
             name="API 프로젝트",
             description="API 프로젝트 설명",
         )
-        replace_project_rankings(
+        ProjectRanking.objects.bulk_create(
             [
                 ProjectRanking(
                     rank=1,
@@ -410,7 +409,7 @@ class ProjectRankingApiTests(TestCase):
                     period_end=date(2026, 8, 13),
                 )
             )
-        replace_project_rankings(rankings)
+        ProjectRanking.objects.bulk_create(rankings)
 
         with self.assertNumQueries(1):
             response = self.client.get(
@@ -686,7 +685,7 @@ class ProjectRankingTaskTests(TestCase):
             student_id=20260004,
             major="컴퓨터과학",
         )
-        replace_project_rankings(expected)
+        ProjectRanking.objects.bulk_create(expected)
         SixMonthProjectRanking.objects.create(
             project=project,
             rank=1,
@@ -739,7 +738,7 @@ class ProjectRankingTaskTests(TestCase):
             period_start=date(2025, 8, 13),
             period_end=date(2026, 8, 13),
         )
-        replace_project_rankings([expected])
+        ProjectRanking.objects.bulk_create([expected])
         SixMonthProjectRanking.objects.create(
             project=project,
             rank=1,

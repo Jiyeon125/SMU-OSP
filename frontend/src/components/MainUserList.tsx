@@ -7,7 +7,7 @@ import { getUserRankings, getUsers } from "../api";
 
 /** 최근 가입자와 사용자 랭킹을 전환해 표시합니다. */
 export default function UserList() {
-  const [selected, setSelected] = useState<"recent" | "active">("recent");
+  const [selected, setSelected] = useState<"recent" | "ranking">("recent");
 
   const {
     data: recentUsersResponse,
@@ -21,9 +21,9 @@ export default function UserList() {
   });
 
   const {
-    data: activeUsersResponse,
-    isLoading: isActiveLoading,
-    isError: isActiveError,
+    data: rankingUsersResponse,
+    isLoading: isRankingLoading,
+    isError: isRankingError,
   } = useQuery<UserRankingResponse>({
     queryKey: ["mainUserRankings", "6m"],
     queryFn: () => getUserRankings(0, 5, "6m"),
@@ -31,13 +31,13 @@ export default function UserList() {
     gcTime: 24 * 60 * 60 * 1000,
   });
 
-  const isLoading = selected === "recent" ? isRecentLoading : isActiveLoading;
+  const isLoading = selected === "recent" ? isRecentLoading : isRankingLoading;
   const isError =
-    (selected === "recent" ? isRecentError : isActiveError) ||
+    (selected === "recent" ? isRecentError : isRankingError) ||
     (!isLoading &&
-      !(selected === "recent" ? recentUsersResponse : activeUsersResponse));
+      !(selected === "recent" ? recentUsersResponse : rankingUsersResponse));
   const recentUsers = recentUsersResponse?.data ?? [];
-  const rankedUsers = activeUsersResponse?.data ?? [];
+  const rankedUsers = rankingUsersResponse?.data ?? [];
   const hasNoUsers =
     selected === "recent" ? recentUsers.length === 0 : rankedUsers.length === 0;
 
@@ -81,13 +81,13 @@ export default function UserList() {
           flex={1}
           size="sm"
           variant="ghost"
-          bg={selected === "active" ? "smu.blue" : "transparent"}
-          color={selected === "active" ? "white" : "smu.darkGray"}
+          bg={selected === "ranking" ? "smu.blue" : "transparent"}
+          color={selected === "ranking" ? "white" : "smu.darkGray"}
           _hover={{
-            bg: selected === "active" ? "smu.blue" : "white",
+            bg: selected === "ranking" ? "smu.blue" : "white",
           }}
-          aria-pressed={selected === "active"}
-          onClick={() => setSelected("active")}
+          aria-pressed={selected === "ranking"}
+          onClick={() => setSelected("ranking")}
         >
           랭킹
         </Button>

@@ -274,13 +274,6 @@ def calculate_project_rankings(
 
 
 @transaction.atomic
-def replace_project_rankings(results: list[ProjectRanking]) -> None:
-    """마지막 정상 프로젝트 랭킹을 한 번에 교체한다."""
-    ProjectRanking.objects.all().delete()
-    ProjectRanking.objects.bulk_create(results)
-
-
-@transaction.atomic
 def replace_daily_rankings(
     *,
     one_year_projects: list[ProjectRanking],
