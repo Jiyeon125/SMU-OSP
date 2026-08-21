@@ -27,7 +27,11 @@ from .services import (
     calculate_user_rankings,
     replace_daily_rankings,
 )
-from .tasks import _months_before, calculate_daily_project_rankings
+from .tasks import (
+    _months_before,
+    calculate_daily_rankings,
+    refresh_users_and_calculate_rankings,
+)
 
 
 class ProjectRankingCalculationTests(TestCase):
@@ -600,7 +604,7 @@ class ProjectRankingTaskTests(TestCase):
         ]
         calculate_users.return_value = six_month_users
 
-        result_count = calculate_daily_project_rankings.run(
+        result_count = calculate_daily_rankings.run(
             period_end="2026-08-13"
         )
 
@@ -639,7 +643,7 @@ class ProjectRankingTaskTests(TestCase):
         calculate_projects.return_value = []
         calculate_users.return_value = []
 
-        calculate_daily_project_rankings.run()
+        calculate_daily_rankings.run()
 
         self.assertEqual(
             calculate_projects.call_args_list,
@@ -702,7 +706,7 @@ class ProjectRankingTaskTests(TestCase):
         )
 
         with self.assertRaises(RuntimeError):
-            calculate_daily_project_rankings.run(period_end="2026-08-13")
+            calculate_daily_rankings.run(period_end="2026-08-13")
 
         actual, count = list_project_rankings(start=0, limit=10)
         self.assertEqual(actual[0].project, project)
@@ -830,14 +834,38 @@ class ProjectRankingTaskTests(TestCase):
         )
         self.assertEqual(SixMonthUserRanking.objects.get().total_score, 4)
 
-    def test_ranking_beat_schedule_runs_once_at_six(self):
+    @patch("rankings.tasks.chain")
+    @patch("rankings.tasks.calculate_daily_rankings.si")
+    @patch("rankings.tasks.daily_update.si")
+    def test_refreshes_users_before_calculating_rankings(
+        self,
+        user_update_signature,
+        ranking_signature,
+        task_chain,
+    ):
+        user_update_signature.return_value = "user-update"
+        ranking_signature.return_value = "ranking-update"
+
+        refresh_users_and_calculate_rankings.run()
+
+        task_chain.assert_called_once_with(
+            "user-update",
+            "ranking-update",
+        )
+        task_chain.return_value.apply_async.assert_called_once_with()
+
+    def test_ranking_beat_schedule_runs_after_user_refresh(self):
         ranking = settings.CELERY_BEAT_SCHEDULE["project-ranking"]
         self.assertEqual(
             ranking["task"],
-            "rankings.tasks.calculate_daily_project_rankings",
+            "rankings.tasks.refresh_users_and_calculate_rankings",
         )
         self.assertEqual(ranking["schedule"].minute, {0})
         self.assertEqual(ranking["schedule"].hour, {6})
+
+        user_update = settings.CELERY_BEAT_SCHEDULE["daily-update"]
+        self.assertEqual(user_update["schedule"].minute, {0})
+        self.assertEqual(user_update["schedule"].hour, {0, 12, 18})
 
 
 class RankingAdminReportTests(TestCase):

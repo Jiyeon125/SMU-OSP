@@ -2,8 +2,10 @@ from calendar import monthrange
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from celery import shared_task
+from celery import chain, shared_task
 from django.conf import settings
+
+from users.tasks import daily_update
 
 from .services import (
     calculate_project_rankings,
@@ -29,7 +31,7 @@ def _months_before(target_date: date, months: int) -> date:
 
 
 @shared_task
-def calculate_daily_project_rankings(
+def calculate_daily_rankings(
     period_end: str | None = None,
 ) -> int:
     """지정일 또는 서비스 기준 전날의 저장 랭킹을 계산한다.
@@ -71,3 +73,16 @@ def calculate_daily_project_rankings(
         + len(six_month_projects)
         + len(six_month_users)
     )
+
+
+@shared_task
+def refresh_users_and_calculate_rankings() -> None:
+    """사용자 활동 갱신 후 일별 랭킹 계산을 순서대로 예약한다.
+
+    사용자 갱신이 성공한 경우에만 랭킹 계산을 실행한다. Immutable signature를
+    사용해 사용자 갱신 결과가 랭킹 집계 종료일로 전달되지 않게 한다.
+    """
+    chain(
+        daily_update.si(),
+        calculate_daily_rankings.si(),
+    ).apply_async()

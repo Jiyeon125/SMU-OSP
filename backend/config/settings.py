@@ -221,14 +221,14 @@ TRENDING_EXCLUDED_LANGUAGES = env.list(
 CELERY_BEAT_SCHEDULE = {
     "daily-update": {
         "task": "users.tasks.daily_update",
-        "schedule": crontab(minute="0", hour="0,6,12,18"),
+        "schedule": crontab(minute="0", hour="0,12,18"),
     },
     "repository-refresh": {
         "task": "projects.tasks.enqueue_daily_repository_refreshes",
         "schedule": crontab(minute="10", hour="0,1,2"),
     },
     "project-ranking": {
-        "task": "rankings.tasks.calculate_daily_project_rankings",
+        "task": "rankings.tasks.refresh_users_and_calculate_rankings",
         "schedule": crontab(minute="0", hour="6"),
     },
     "trending-repositories": {
