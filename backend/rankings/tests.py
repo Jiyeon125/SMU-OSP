@@ -251,7 +251,7 @@ class ProjectRankingCalculationTests(TestCase):
             {repository.project_id for repository in repositories},
         )
 
-    def test_assigns_competition_ranks_and_name_order(self):
+    def test_assigns_sequential_ranks_and_name_order(self):
         project_ids = {}
         for name, stars in (
             ("나 프로젝트", 5),
@@ -286,7 +286,7 @@ class ProjectRankingCalculationTests(TestCase):
             [(result.rank, result.project_id) for result in results],
             [
                 (1, project_ids["가 프로젝트"]),
-                (1, project_ids["나 프로젝트"]),
+                (2, project_ids["나 프로젝트"]),
                 (3, project_ids["다 프로젝트"]),
             ],
         )

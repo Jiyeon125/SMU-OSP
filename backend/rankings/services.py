@@ -250,27 +250,20 @@ def calculate_project_rankings(
         )
     )
 
-    results = []
-    previous_score = None
-    current_rank = 0
-    for position, item in enumerate(metrics, start=1):
-        if item.total_score != previous_score:
-            current_rank = position
-            previous_score = item.total_score
-        results.append(
-            ProjectRanking(
-                rank=current_rank,
-                project=item.project,
-                total_score=item.total_score,
-                stars=item.stars,
-                forks=item.forks,
-                commits=item.commits,
-                pull_requests=item.pull_requests,
-                period_start=item.period_start,
-                period_end=period_end,
-            )
+    return [
+        ProjectRanking(
+            rank=rank,
+            project=item.project,
+            total_score=item.total_score,
+            stars=item.stars,
+            forks=item.forks,
+            commits=item.commits,
+            pull_requests=item.pull_requests,
+            period_start=item.period_start,
+            period_end=period_end,
         )
-    return results
+        for rank, item in enumerate(metrics, start=1)
+    ]
 
 
 @transaction.atomic
