@@ -15,7 +15,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { PaginationState } from "@tanstack/react-table";
 import { Link as RouterLink } from "react-router-dom";
-import { getProjectRankings, getUsers } from "../api";
+import { getProjectRankings, getUserRankings } from "../api";
 import {
     PaginationItems,
     PaginationNextTrigger,
@@ -23,7 +23,7 @@ import {
     PaginationRoot,
 } from "../components/ui/pagination";
 import ProjectRankingTable from "../components/ProjectRankingTable";
-import { PublicUserListResponse } from "../types";
+import type { RankingPeriod, UserRankingResponse } from "../types";
 import type { ProjectRankingResponse } from "../types/project";
 
 type RankingSubject = "users" | "projects";
@@ -76,6 +76,7 @@ function RankingTreeItem({
 /** 사용자와 프로젝트의 오픈소스 활동 랭킹 화면을 표시합니다. */
 export default function RankBoard() {
     const [rankingSubject, setRankingSubject] = useState<RankingSubject>("users");
+    const [rankingPeriod, setRankingPeriod] = useState<RankingPeriod>("1y");
     const [paginationBySubject, setPaginationBySubject] = useState<
         Record<RankingSubject, PaginationState>
     >({
@@ -89,18 +90,19 @@ export default function RankBoard() {
         data: userRankingResponse,
         isLoading,
         isError: isUserRankingError,
-    } = useQuery<PublicUserListResponse>({
+    } = useQuery<UserRankingResponse>({
         queryKey: [
             "rankingUsers",
+            rankingPeriod,
             userPagination.pageIndex,
             userPagination.pageSize,
         ],
         queryFn: () =>
-            getUsers({
-                start: userPagination.pageIndex * userPagination.pageSize,
-                limit: userPagination.pageSize,
-                sortBy: "score",
-            }),
+            getUserRankings(
+                userPagination.pageIndex * userPagination.pageSize,
+                userPagination.pageSize,
+                rankingPeriod,
+            ),
     });
     const users = userRankingResponse?.data ?? [];
     const {
@@ -110,6 +112,7 @@ export default function RankBoard() {
     } = useQuery<ProjectRankingResponse>({
         queryKey: [
             "rankingProjects",
+            rankingPeriod,
             projectPagination.pageIndex,
             projectPagination.pageSize,
         ],
@@ -117,6 +120,7 @@ export default function RankBoard() {
             getProjectRankings(
                 projectPagination.pageIndex * projectPagination.pageSize,
                 projectPagination.pageSize,
+                rankingPeriod,
             ),
     });
     const selectSubject = (subject: RankingSubject) => {
@@ -131,6 +135,13 @@ export default function RankBoard() {
         setPaginationBySubject((current) => ({
             ...current,
             [rankingSubject]: { pageIndex: 0, pageSize: nextPageSize },
+        }));
+    };
+    const selectPeriod = (period: RankingPeriod) => {
+        setRankingPeriod(period);
+        setPaginationBySubject((current) => ({
+            users: { ...current.users, pageIndex: 0 },
+            projects: { ...current.projects, pageIndex: 0 },
         }));
     };
     const rankingCount =
@@ -197,16 +208,28 @@ export default function RankBoard() {
                             <Text fontSize="sm" fontWeight="medium">
                                 집계기간
                             </Text>
-                            <Button
-                                size="xs"
-                                bg="smu.blue"
-                                color="white"
-                                _hover={{ bg: "smu.blue" }}
-                                aria-pressed="true"
-                                cursor="default"
-                            >
-                                1년
-                            </Button>
+                            {(
+                                [
+                                    ["6m", "6개월"],
+                                    ["1y", "1년"],
+                                ] as const
+                            ).map(([period, label]) => (
+                                <Button
+                                    key={period}
+                                    size="xs"
+                                    variant={rankingPeriod === period ? "solid" : "outline"}
+                                    bg={rankingPeriod === period ? "smu.blue" : "white"}
+                                    color={rankingPeriod === period ? "white" : "smu.blue"}
+                                    borderColor="smu.blue"
+                                    _hover={{
+                                        bg: rankingPeriod === period ? "smu.blue" : "blue.50",
+                                    }}
+                                    aria-pressed={rankingPeriod === period}
+                                    onClick={() => selectPeriod(period)}
+                                >
+                                    {label}
+                                </Button>
+                            ))}
                         </HStack>
                         <Select.Root
                             width="130px"
@@ -268,18 +291,20 @@ export default function RankBoard() {
                                     <Table.ColumnHeader>사용자</Table.ColumnHeader>
                                     <Table.ColumnHeader textAlign="right">총점</Table.ColumnHeader>
                                     <Table.ColumnHeader textAlign="right">Star</Table.ColumnHeader>
-                                    <Table.ColumnHeader textAlign="right">Commit</Table.ColumnHeader>
+                                    <Table.ColumnHeader textAlign="right">
+                                        Commit
+                                    </Table.ColumnHeader>
                                     <Table.ColumnHeader textAlign="right">PR</Table.ColumnHeader>
                                     <Table.ColumnHeader textAlign="right">Issue</Table.ColumnHeader>
-                                    <Table.ColumnHeader textAlign="right">가입일</Table.ColumnHeader>
+                                    <Table.ColumnHeader textAlign="right">
+                                        가입일
+                                    </Table.ColumnHeader>
                                 </Table.Row>
                             </Table.Header>
                             <Table.Body>
-                                {users.map((user, index) => (
+                                {users.map((user) => (
                                     <Table.Row key={user.username}>
-                                        <Table.Cell fontWeight="bold">
-                                            {pagination.pageIndex * pagination.pageSize + index + 1}
-                                        </Table.Cell>
+                                        <Table.Cell fontWeight="bold">{user.rank}</Table.Cell>
                                         <Table.Cell>
                                             <Text
                                                 asChild
@@ -293,22 +318,20 @@ export default function RankBoard() {
                                             </Text>
                                         </Table.Cell>
                                         <Table.Cell textAlign="right" fontWeight="bold">
-                                            {user.score ?? 0}
+                                            {user.totalScore}
                                         </Table.Cell>
-                                        <Table.Cell textAlign="right">
-                                            {user.stars ?? 0}
-                                        </Table.Cell>
+                                        <Table.Cell textAlign="right">{user.stars ?? 0}</Table.Cell>
                                         <Table.Cell textAlign="right">
                                             {user.commits ?? 0}
                                         </Table.Cell>
                                         <Table.Cell textAlign="right">
-                                            {user.prs ?? 0}
+                                            {user.pullRequests}
                                         </Table.Cell>
                                         <Table.Cell textAlign="right">
                                             {user.issues ?? 0}
                                         </Table.Cell>
                                         <Table.Cell textAlign="right">
-                                            {user.date_joined.substring(0, 10)}
+                                            {user.dateJoined.substring(0, 10)}
                                         </Table.Cell>
                                     </Table.Row>
                                 ))}

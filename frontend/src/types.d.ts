@@ -20,6 +20,24 @@ export interface IPublicUser {
 
 export type PublicUserListResponse = ApiSuccess<IPublicUser[], PaginationDetail>;
 
+/** 랭킹 화면에서 선택할 수 있는 집계기간입니다. */
+export type RankingPeriod = "6m" | "1y";
+
+/** 사용자 한 건의 선택 기간 GitHub 지표 랭킹 결과입니다. */
+export interface UserRanking {
+  rank: number;
+  username: string;
+  totalScore: number;
+  stars: number;
+  commits: number;
+  pullRequests: number;
+  issues: number;
+  dateJoined: string;
+}
+
+/** 사용자 랭킹 API 응답입니다. */
+export type UserRankingResponse = ApiSuccess<UserRanking[], PaginationDetail>;
+
 /** 메인 화면에 노출하는 트렌딩 GitHub Repository입니다. */
 export interface TrendingRepository {
   githubId: number;
