@@ -17,26 +17,6 @@ from .services import (
     calculate_user_rankings,
 )
 
-USER_COLUMNS = (
-    "순위",
-    "사용자",
-    "총점",
-    "Star",
-    "Commit",
-    "PR",
-    "Issue",
-    "가입일",
-)
-PROJECT_COLUMNS = (
-    "순위",
-    "프로젝트",
-    "총점",
-    "Star",
-    "Fork",
-    "Commit",
-    "PR",
-)
-
 
 class RankingResource(resources.Resource):
     """내보내기 형식에 맞게 랭킹 문자열을 준비한다."""
@@ -106,39 +86,17 @@ def _ranking_report_rows(
     ranking_type: str,
     period_start: date,
     period_end: date,
-) -> tuple[Sequence[str], list[list[Any]]]:
+) -> tuple[Sequence[str], list[Sequence[Any]]]:
     if ranking_type == "users":
         results = calculate_user_rankings(period_start, period_end)
-        return USER_COLUMNS, [
-            [
-                result.rank,
-                result.user.username,
-                result.total_score,
-                result.stars,
-                result.commits,
-                result.pull_requests,
-                result.issues,
-                result.user.date_joined.date(),
-            ]
-            for result in results
-        ]
-
-    results = calculate_project_rankings(
-        period_start,
-        period_end,
-    )
-    return PROJECT_COLUMNS, [
-        [
-            result.rank,
-            result.project.name,
-            result.total_score,
-            result.stars,
-            result.forks,
-            result.commits,
-            result.pull_requests,
-        ]
-        for result in results
-    ]
+        dataset = UserRankingResource().export(results)
+    else:
+        results = calculate_project_rankings(
+            period_start,
+            period_end,
+        )
+        dataset = ProjectRankingResource().export(results)
+    return dataset.headers or (), list(dataset)
 
 
 def _csv_safe(value: Any) -> Any:
@@ -249,7 +207,7 @@ class ProjectRankingAdmin(ExportMixin, admin.ModelAdmin):
         request: HttpRequest,
         extra_context: dict[str, Any] | None = None,
     ) -> HttpResponse:
-        """검증된 기간의 랭킹 표 또는 CSV 응답을 반환한다."""
+        """검증된 기간의 랭킹 표 또는 내보내기 응답을 반환한다."""
         if not self.has_view_permission(request):
             raise PermissionDenied
 
