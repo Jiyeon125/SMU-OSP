@@ -19,8 +19,8 @@ export default function MainProjectList() {
     isLoading: isRankingLoading,
     isError: isRankingError,
   } = useQuery<ProjectRankingResponse>({
-      queryKey: ["mainProjectRankings"],
-      queryFn: () => getProjectRankings(0, 5),
+      queryKey: ["mainProjectRankings", "6m"],
+      queryFn: () => getProjectRankings(0, 5, "6m"),
       staleTime: 24 * 60 * 60 * 1000,
       gcTime: 24 * 60 * 60 * 1000,
     });

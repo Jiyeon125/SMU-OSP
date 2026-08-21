@@ -143,7 +143,7 @@ export const getProjectLanguages = () =>
  * @param period 조회할 집계기간
  * @returns 프로젝트 랭킹 API 응답
  */
-export const getProjectRankings = (start: number, limit: number, period: RankingPeriod = "1y") =>
+export const getProjectRankings = (start: number, limit: number, period: RankingPeriod = "6m") =>
     instance
         .get<ProjectRankingResponse>("rankings/projects", {
             params: { start, limit, period },

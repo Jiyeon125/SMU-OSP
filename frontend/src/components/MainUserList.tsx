@@ -1,9 +1,9 @@
 import { Box, Button, HStack, Separator, Text } from "@chakra-ui/react";
 import { Link } from "react-router-dom";
-import { PublicUserListResponse } from "../types";
+import { PublicUserListResponse, UserRankingResponse } from "../types";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { getUsers } from "../api";
+import { getUserRankings, getUsers } from "../api";
 
 /** 최근 가입자와 사용자 랭킹을 전환해 표시합니다. */
 export default function UserList() {
@@ -24,20 +24,22 @@ export default function UserList() {
     data: activeUsersResponse,
     isLoading: isActiveLoading,
     isError: isActiveError,
-  } = useQuery<PublicUserListResponse>({
-    queryKey: ["activeUsers"],
-    queryFn: () => getUsers({ limit: 5, sortBy: "score" }),
+  } = useQuery<UserRankingResponse>({
+    queryKey: ["mainUserRankings", "6m"],
+    queryFn: () => getUserRankings(0, 5, "6m"),
     staleTime: 24 * 60 * 60 * 1000,
     gcTime: 24 * 60 * 60 * 1000,
   });
 
   const isLoading = selected === "recent" ? isRecentLoading : isActiveLoading;
-  const selectedResponse =
-    selected === "recent" ? recentUsersResponse : activeUsersResponse;
   const isError =
     (selected === "recent" ? isRecentError : isActiveError) ||
-    (!isLoading && !selectedResponse);
-  const users = selectedResponse?.data ?? [];
+    (!isLoading &&
+      !(selected === "recent" ? recentUsersResponse : activeUsersResponse));
+  const recentUsers = recentUsersResponse?.data ?? [];
+  const rankedUsers = activeUsersResponse?.data ?? [];
+  const hasNoUsers =
+    selected === "recent" ? recentUsers.length === 0 : rankedUsers.length === 0;
 
   return (
     <Box
@@ -99,12 +101,12 @@ export default function UserList() {
           <Text mt={8} textAlign="center" color="red.600" fontSize="sm">
             사용자 현황을 불러오지 못했습니다.
           </Text>
-        ) : users.length === 0 ? (
+        ) : hasNoUsers ? (
           <Text mt={8} textAlign="center" color="smu.darkGray" fontSize="sm">
             표시할 사용자가 없습니다.
           </Text>
         ) : selected === "recent" ? (
-          users.map((user) => (
+          recentUsers.map((user) => (
               <HStack key={user.username} gap={3} minW={0}>
                 <Text flex={1} minW={0} truncate>
                   {user.username}
@@ -120,10 +122,10 @@ export default function UserList() {
               </HStack>
             ))
         ) : (
-          users.map((user, index) => (
+          rankedUsers.map((user) => (
               <HStack key={user.username} gap={3} minW={0}>
                 <Text width="24px" flexShrink={0} fontWeight="bold">
-                  {index + 1}
+                  {user.rank}
                 </Text>
                 <Text flex={1} minW={0} truncate>
                   {user.username}
@@ -135,7 +137,7 @@ export default function UserList() {
                   color="smu.blue"
                   fontWeight="bold"
                 >
-                  {user.score ?? 0}점
+                  {user.totalScore}점
                 </Text>
               </HStack>
             ))

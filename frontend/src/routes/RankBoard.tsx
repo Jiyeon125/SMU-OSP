@@ -76,7 +76,7 @@ function RankingTreeItem({
 /** 사용자와 프로젝트의 오픈소스 활동 랭킹 화면을 표시합니다. */
 export default function RankBoard() {
     const [rankingSubject, setRankingSubject] = useState<RankingSubject>("users");
-    const [rankingPeriod, setRankingPeriod] = useState<RankingPeriod>("1y");
+    const [rankingPeriod, setRankingPeriod] = useState<RankingPeriod>("6m");
     const [paginationBySubject, setPaginationBySubject] = useState<
         Record<RankingSubject, PaginationState>
     >({
