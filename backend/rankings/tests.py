@@ -23,6 +23,7 @@ from .services import (
     replace_project_rankings,
 )
 from .tasks import calculate_daily_project_rankings
+from .views import _months_before
 
 
 class ProjectRankingCalculationTests(TestCase):
@@ -437,6 +438,107 @@ class ProjectRankingApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(
             response.json()["status"], "INVALID_PAGINATION_PARAMETER"
+        )
+
+    @patch(
+        "rankings.views._ranking_period_dates",
+        return_value=(date(2026, 2, 20), date(2026, 8, 20)),
+    )
+    def test_returns_calculated_six_month_project_rankings(
+        self,
+        _ranking_period_dates,
+    ):
+        project = Project.objects.create(
+            name="6개월 프로젝트",
+            description="6개월 프로젝트 설명",
+        )
+        repository = Repository.objects.create(
+            project=project,
+            github_id=100,
+            name="six-month-project",
+            full_name="example/six-month-project",
+            html_url="https://github.com/example/six-month-project",
+        )
+        for snapshot_date, commits in (
+            (date(2026, 2, 20), 2),
+            (date(2026, 8, 20), 7),
+        ):
+            RepositorySnapshot.objects.create(
+                repository=repository,
+                date=snapshot_date,
+                stars=3,
+                forks=0,
+                commits=commits,
+                pull_requests=0,
+                has_code_changed=False,
+            )
+
+        response = self.client.get(
+            "/api/v1/rankings/projects",
+            {"period": "6m"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"][0]["projectId"], project.pk)
+        self.assertEqual(response.json()["data"][0]["commits"], 5)
+        self.assertEqual(ProjectRanking.objects.count(), 0)
+
+    def test_rejects_invalid_ranking_period(self):
+        response = self.client.get(
+            "/api/v1/rankings/projects",
+            {"period": "3m"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["status"], "INVALID_RANKING_PERIOD")
+
+
+class UserRankingApiTests(TestCase):
+    @patch(
+        "rankings.views._ranking_period_dates",
+        return_value=(date(2026, 2, 20), date(2026, 8, 20)),
+    )
+    def test_returns_user_rankings_for_selected_period(
+        self,
+        _ranking_period_dates,
+    ):
+        user = User.objects.create_user(
+            username="six-month-user",
+            password="password",
+            github_email="six-month@example.com",
+            name="6개월 사용자",
+            student_id=20260001,
+            major="컴퓨터과학",
+        )
+        User.objects.filter(pk=user.pk).update(
+            date_joined=datetime(2026, 1, 1, tzinfo=UTC)
+        )
+        UserActivity.objects.create(
+            user=user,
+            activity_date=date(2026, 8, 20),
+            stars=4,
+            commits=3,
+            prs=2,
+            issues=1,
+        )
+
+        response = self.client.get(
+            "/api/v1/rankings/users",
+            {"period": "6m"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["data"][0]["rank"], 1)
+        self.assertEqual(body["data"][0]["username"], user.username)
+        self.assertEqual(body["data"][0]["totalScore"], 10)
+        self.assertEqual(body["data"][0]["pullRequests"], 2)
+        self.assertEqual(body["detail"]["pagination"]["count"], 1)
+
+    def test_clamps_six_month_period_to_last_calendar_day(self):
+        self.assertEqual(
+            _months_before(date(2026, 8, 31), 6),
+            date(2026, 2, 28),
         )
 
 
