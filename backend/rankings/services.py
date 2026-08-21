@@ -7,9 +7,13 @@ from django.core.exceptions import ImproperlyConfigured
 from django.db import transaction
 
 from projects.models import Project
+from users.models import User
 
 from .models import ProjectRanking
-from .selectors import list_project_ranking_targets
+from .selectors import (
+    list_project_ranking_targets,
+    list_user_ranking_targets,
+)
 
 SCORE_QUANTUM = Decimal("0.01")
 
@@ -117,23 +121,82 @@ class ProjectRankingMetrics:
         )
 
 
-def _one_year_before(target_date: date) -> date:
-    try:
-        return target_date.replace(year=target_date.year - 1)
-    except ValueError:
-        return target_date.replace(year=target_date.year - 1, day=28)
+@dataclass(frozen=True)
+class UserRankingResult:
+    """관리자 기간 조회에 사용하는 사용자 랭킹 결과."""
+
+    user: User
+    rank: int
+    total_score: int
+    stars: int
+    commits: int
+    pull_requests: int
+    issues: int
 
 
-def calculate_project_rankings(period_end: date) -> list[ProjectRanking]:
-    """최근 1년 프로젝트 랭킹을 계산한다.
+def calculate_user_rankings(
+    period_start: date,
+    period_end: date,
+) -> list[UserRankingResult]:
+    """지정 기간의 사용자 활동 합계와 종료일 누적 Star로 순위를 계산한다."""
+    users = list_user_ranking_targets(period_start, period_end)
+    metrics = []
+    for user in users:
+        stars = int(user.ranking_stars)
+        commits = int(user.ranking_commits)
+        pull_requests = int(user.ranking_prs)
+        issues = int(user.ranking_issues)
+        total_score = stars + commits + pull_requests + issues
+        metrics.append(
+            (
+                user,
+                total_score,
+                stars,
+                commits,
+                pull_requests,
+                issues,
+            )
+        )
+    metrics.sort(
+        key=lambda item: (
+            -item[1],
+            item[0].username,
+        )
+    )
+    return [
+        UserRankingResult(
+            user=user,
+            rank=rank,
+            total_score=total_score,
+            stars=stars,
+            commits=commits,
+            pull_requests=pull_requests,
+            issues=issues,
+        )
+        for rank, (
+            user,
+            total_score,
+            stars,
+            commits,
+            pull_requests,
+            issues,
+        ) in enumerate(metrics, start=1)
+    ]
+
+
+def calculate_project_rankings(
+    period_start: date,
+    period_end: date,
+) -> list[ProjectRanking]:
+    """지정 기간의 시작·종료 스냅샷으로 프로젝트 랭킹을 계산한다.
 
     Args:
+        period_start: 증가량 차감에 사용할 집계 시작일.
         period_end: 랭킹 집계 종료일.
 
     Returns:
         순위와 프로젝트별 지표가 확정된 랭킹 목록.
     """
-    period_start = _one_year_before(period_end)
     weights = ProjectRankingWeights.from_settings()
     projects = list_project_ranking_targets(period_start, period_end)
     metrics = [
@@ -162,7 +225,7 @@ def calculate_project_rankings(period_end: date) -> list[ProjectRanking]:
         results.append(
             ProjectRanking(
                 rank=current_rank,
-                project_id=item.project.pk,
+                project=item.project,
                 total_score=item.total_score,
                 stars=item.stars,
                 forks=item.forks,
@@ -173,8 +236,6 @@ def calculate_project_rankings(period_end: date) -> list[ProjectRanking]:
             )
         )
     return results
-
-
 @transaction.atomic
 def replace_project_rankings(results: list[ProjectRanking]) -> None:
     """마지막 정상 프로젝트 랭킹을 한 번에 교체한다."""
