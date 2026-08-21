@@ -1,11 +1,11 @@
-import requests
-from datetime import datetime, timedelta, UTC
+import logging
+from datetime import UTC, datetime, timedelta
 
-from django.conf import settings
+import requests
 from celery import shared_task
+from django.conf import settings
 
 from users.models import User, UserActivity
-
 
 GITHUB_API_URL = "https://api.github.com/graphql"
 
@@ -13,6 +13,7 @@ HEADERS = {
     "Authorization": f"Bearer {settings.GH_PAT}",
     "Content-Type": "application/json",
 }
+logger = logging.getLogger(__name__)
 
 
 @shared_task
@@ -22,14 +23,26 @@ def daily_update():
     for user in users:
         print(f"Start User {user.username} updated")
 
-        data = get_initial_info(user.username)
+        try:
+            data = get_initial_info(user.username)
+            if data is None:
+                logger.error(
+                    "GitHub activity collection failed for user %s",
+                    user.username,
+                )
+                continue
+            stars = sum(
+                repo["stargazerCount"]
+                for repo in data["data"]["user"]["repositories"]["nodes"]
+            )
+        except (requests.RequestException, KeyError, TypeError, ValueError):
+            logger.exception(
+                "GitHub activity collection failed for user %s",
+                user.username,
+            )
+            continue
 
         print(data)
-
-        stars = sum(
-            repo["stargazerCount"]
-            for repo in data["data"]["user"]["repositories"]["nodes"]
-        )
         user.stars = stars
         user.save()
 
@@ -39,7 +52,7 @@ def daily_update():
         user.update_score()
         print(f"User {user.username} updated")
 
-    print(f"All users updated")
+    print("All users updated")
 
 
 @shared_task

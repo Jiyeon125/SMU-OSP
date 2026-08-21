@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from users.models import UserActivity
-from users.tasks import save_yesterday_contributions
+from users.tasks import daily_update, save_yesterday_contributions
 
 
 class UserSignalTests(TestCase):
@@ -62,6 +62,50 @@ class UserActivityStarSnapshotTests(TestCase):
         activity = UserActivity.objects.create(user=self.user)
 
         self.assertIsNone(activity.stars)
+
+    @patch("users.tasks.save_yesterday_contributions")
+    @patch("users.tasks.get_initial_info")
+    def test_daily_update_continues_after_user_collection_failure(
+        self,
+        get_initial_info,
+        save_yesterday_contributions,
+    ):
+        successful_user = get_user_model().objects.create_user(
+            username="activity-success",
+            github_email="activity-success@example.com",
+            name="수집 성공 사용자",
+            student_id=3,
+            major="IT공학",
+        )
+        successful_response = {
+            "data": {
+                "user": {
+                    "repositories": {
+                        "nodes": [{"stargazerCount": 7}],
+                    }
+                }
+            }
+        }
+        get_initial_info.side_effect = lambda username: (
+            successful_response
+            if username == successful_user.username
+            else None
+        )
+
+        with (
+            patch("users.models.User.update_contributions"),
+            patch("users.models.User.update_score"),
+        ):
+            daily_update.run()
+
+        successful_user.refresh_from_db()
+        self.user.refresh_from_db()
+        self.assertEqual(successful_user.stars, 7)
+        self.assertEqual(self.user.stars, 0)
+        save_yesterday_contributions.assert_called_once_with(
+            successful_user,
+            7,
+        )
 
 
 class UserListApiTests(TestCase):
