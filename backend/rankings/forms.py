@@ -45,7 +45,7 @@ class RankingQueryForm(forms.Form):
         return RankingQuery(
             start=self.cleaned_data["start"] or 0,
             limit=self.cleaned_data["limit"] or 100,
-            period=self.cleaned_data["period"] or "1y",
+            period=self.cleaned_data["period"] or "6m",
         )
 
 

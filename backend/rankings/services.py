@@ -8,8 +8,13 @@ from django.db import transaction
 
 from projects.models import Project
 from users.models import User
+from users.selectors import list_public_users
 
-from .models import ProjectRanking
+from .models import (
+    ProjectRanking,
+    SixMonthProjectRanking,
+    SixMonthUserRanking,
+)
 from .selectors import (
     list_project_ranking_targets,
     list_user_ranking_targets,
@@ -123,7 +128,7 @@ class ProjectRankingMetrics:
 
 @dataclass(frozen=True)
 class UserRankingResult:
-    """관리자 기간 조회에 사용하는 사용자 랭킹 결과."""
+    """사용자 랭킹 응답에 사용하는 지표와 순위."""
 
     user: User
     rank: int
@@ -132,6 +137,36 @@ class UserRankingResult:
     commits: int
     pull_requests: int
     issues: int
+
+
+def list_saved_user_rankings(
+    *,
+    start: int,
+    limit: int,
+) -> tuple[list[UserRankingResult], int]:
+    """기존 User 저장값으로 1년 사용자 랭킹을 조회한다.
+
+    기존 1년 랭킹의 저장·갱신 계약을 유지하기 위해 UserActivity를
+    다시 집계하지 않는다.
+    """
+    users, count = list_public_users(
+        start=start,
+        limit=limit,
+        sort_by="score",
+    )
+    results = [
+        UserRankingResult(
+            user=user,
+            rank=rank,
+            total_score=int(user.score or 0),
+            stars=int(user.stars or 0),
+            commits=int(user.commits or 0),
+            pull_requests=int(user.prs or 0),
+            issues=int(user.issues or 0),
+        )
+        for rank, user in enumerate(users, start=start + 1)
+    ]
+    return results, count
 
 
 def calculate_user_rankings(
@@ -236,8 +271,59 @@ def calculate_project_rankings(
             )
         )
     return results
+
+
 @transaction.atomic
 def replace_project_rankings(results: list[ProjectRanking]) -> None:
     """마지막 정상 프로젝트 랭킹을 한 번에 교체한다."""
     ProjectRanking.objects.all().delete()
     ProjectRanking.objects.bulk_create(results)
+
+
+@transaction.atomic
+def replace_daily_rankings(
+    *,
+    one_year_projects: list[ProjectRanking],
+    six_month_projects: list[ProjectRanking],
+    six_month_users: list[UserRankingResult],
+    six_month_period_start: date,
+    period_end: date,
+) -> None:
+    """일별 1년·6개월 랭킹 저장 결과를 함께 교체한다."""
+    ProjectRanking.objects.all().delete()
+    SixMonthProjectRanking.objects.all().delete()
+    SixMonthUserRanking.objects.all().delete()
+
+    ProjectRanking.objects.bulk_create(one_year_projects)
+    SixMonthProjectRanking.objects.bulk_create(
+        [
+            SixMonthProjectRanking(
+                project_id=result.project_id,
+                rank=result.rank,
+                total_score=result.total_score,
+                stars=result.stars,
+                forks=result.forks,
+                commits=result.commits,
+                pull_requests=result.pull_requests,
+                period_start=result.period_start,
+                period_end=result.period_end,
+            )
+            for result in six_month_projects
+        ]
+    )
+    SixMonthUserRanking.objects.bulk_create(
+        [
+            SixMonthUserRanking(
+                user_id=result.user.pk,
+                rank=result.rank,
+                total_score=result.total_score,
+                stars=result.stars,
+                commits=result.commits,
+                pull_requests=result.pull_requests,
+                issues=result.issues,
+                period_start=six_month_period_start,
+                period_end=period_end,
+            )
+            for result in six_month_users
+        ]
+    )

@@ -1,8 +1,3 @@
-from calendar import monthrange
-from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo
-
-from django.conf import settings
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -11,31 +6,18 @@ from common.pagination import pagination_detail
 from common.responses import fail, success
 
 from .forms import RankingQueryForm
-from .selectors import list_project_rankings
+from .selectors import (
+    list_project_rankings,
+    list_six_month_project_rankings,
+    list_six_month_user_rankings,
+)
 from .serializers import (
     ProjectRankingResultSerializer,
     UserRankingResultSerializer,
 )
-from .services import calculate_project_rankings, calculate_user_rankings
-
-
-def _months_before(target_date: date, months: int) -> date:
-    """달력 기준으로 지정한 개월 수 전의 날짜를 반환한다."""
-    month_index = target_date.year * 12 + target_date.month - 1 - months
-    year, zero_based_month = divmod(month_index, 12)
-    month = zero_based_month + 1
-    day = min(target_date.day, monthrange(year, month)[1])
-    return target_date.replace(year=year, month=month, day=day)
-
-
-def _ranking_period_dates(period: str) -> tuple[date, date]:
-    """서비스 기준 전날을 종료일로 하는 랭킹 집계 기간을 반환한다."""
-    period_end = (
-        datetime.now(ZoneInfo(settings.CELERY_TIMEZONE)).date()
-        - timedelta(days=1)
-    )
-    months = 6 if period == "6m" else 12
-    return _months_before(period_end, months), period_end
+from .services import (
+    list_saved_user_rankings,
+)
 
 
 def _invalid_query_response(query_form: RankingQueryForm) -> Response:
@@ -60,16 +42,23 @@ class UserRankings(APIView):
         if not query_form.is_valid():
             return _invalid_query_response(query_form)
         query = query_form.to_query()
-        period_start, period_end = _ranking_period_dates(query.period)
-        rankings = calculate_user_rankings(period_start, period_end)
-        results = rankings[query.start : query.start + query.limit]
+        if query.period == "1y":
+            results, count = list_saved_user_rankings(
+                start=query.start,
+                limit=query.limit,
+            )
+        else:
+            results, count = list_six_month_user_rankings(
+                start=query.start,
+                limit=query.limit,
+            )
         return Response(
             success(
                 UserRankingResultSerializer(results, many=True).data,
                 pagination_detail(
                     query.start,
                     query.limit,
-                    len(rankings),
+                    count,
                 ),
             ),
             status=status.HTTP_200_OK,
@@ -91,10 +80,10 @@ class ProjectRankings(APIView):
                 limit=query.limit,
             )
         else:
-            period_start, period_end = _ranking_period_dates(query.period)
-            rankings = calculate_project_rankings(period_start, period_end)
-            count = len(rankings)
-            results = rankings[query.start : query.start + query.limit]
+            results, count = list_six_month_project_rankings(
+                start=query.start,
+                limit=query.limit,
+            )
         return Response(
             success(
                 ProjectRankingResultSerializer(results, many=True).data,

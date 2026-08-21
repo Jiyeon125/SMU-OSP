@@ -17,7 +17,11 @@ from django.db.models.functions import Coalesce
 from projects.models import Project, RepositorySnapshot
 from users.models import User, UserActivity
 
-from .models import ProjectRanking
+from .models import (
+    ProjectRanking,
+    SixMonthProjectRanking,
+    SixMonthUserRanking,
+)
 
 
 def list_user_ranking_targets(
@@ -101,6 +105,65 @@ def list_project_rankings(
     if start == 0:
         return results, 0
     return results, ProjectRanking.objects.count()
+
+
+def list_six_month_user_rankings(
+    *,
+    start: int,
+    limit: int,
+) -> tuple[list[SixMonthUserRanking], int]:
+    """마지막 정상 6개월 사용자 랭킹의 요청 구간을 조회한다."""
+    rankings = (
+        SixMonthUserRanking.objects.select_related("user")
+        .only(
+            "user_id",
+            "user__username",
+            "user__date_joined",
+            "rank",
+            "total_score",
+            "stars",
+            "commits",
+            "pull_requests",
+            "issues",
+        )
+        .annotate(total_count=Window(Count("user_id")))
+        .order_by("rank", "user__username", "user_id")
+    )
+    results = list(rankings[start : start + limit])
+    if results:
+        return results, results[0].total_count
+    if start == 0:
+        return results, 0
+    return results, SixMonthUserRanking.objects.count()
+
+
+def list_six_month_project_rankings(
+    *,
+    start: int,
+    limit: int,
+) -> tuple[list[SixMonthProjectRanking], int]:
+    """마지막 정상 6개월 프로젝트 랭킹의 요청 구간을 조회한다."""
+    rankings = (
+        SixMonthProjectRanking.objects.select_related("project")
+        .only(
+            "project_id",
+            "project__name",
+            "rank",
+            "total_score",
+            "stars",
+            "forks",
+            "commits",
+            "pull_requests",
+        )
+        .annotate(total_count=Window(Count("project_id")))
+        .order_by("rank", "project__name", "project_id")
+    )
+    results = list(rankings[start : start + limit])
+    if results:
+        return results, results[0].total_count
+    if start == 0:
+        return results, 0
+    return results, SixMonthProjectRanking.objects.count()
 
 
 def list_project_ranking_targets(
