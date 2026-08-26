@@ -821,6 +821,7 @@ class ProjectRankingTaskTests(TestCase):
             5,
         )
 
+    @patch("rankings.tasks.datetime")
     @patch("rankings.tasks.chain")
     @patch("rankings.tasks.calculate_daily_rankings.si")
     @patch("rankings.tasks.daily_update.si")
@@ -829,12 +830,21 @@ class ProjectRankingTaskTests(TestCase):
         user_update_signature,
         ranking_signature,
         task_chain,
+        task_datetime,
     ):
+        task_datetime.now.return_value = datetime(2026, 8, 26, 3, 10)
         user_update_signature.return_value = "user-update"
         ranking_signature.return_value = "ranking-update"
 
         refresh_users_and_calculate_rankings.run()
 
+        task_datetime.now.assert_called_once_with(UTC)
+        user_update_signature.assert_called_once_with(
+            period_end="2026-08-25"
+        )
+        ranking_signature.assert_called_once_with(
+            period_end="2026-08-25"
+        )
         task_chain.assert_called_once_with(
             "user-update",
             "ranking-update",

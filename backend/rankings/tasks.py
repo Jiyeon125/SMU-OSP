@@ -18,7 +18,7 @@ def calculate_daily_rankings(
     """지정일 또는 서비스 기준 전날의 저장 랭킹을 계산한다.
 
     Args:
-        period_end: ISO 8601 형식의 집계 종료일. 없으면 서비스 날짜의 전날.
+        period_end: ISO 8601 형식의 집계 종료일. 없으면 UTC 기준 전날.
 
     Returns:
         DB에 저장한 1년·6개월 프로젝트 랭킹 결과 수.
@@ -49,10 +49,12 @@ def calculate_daily_rankings(
 def refresh_users_and_calculate_rankings() -> None:
     """사용자 활동 갱신 후 일별 랭킹 계산을 순서대로 예약한다.
 
-    사용자 갱신이 성공한 경우에만 랭킹 계산을 실행한다. Immutable signature를
-    사용해 사용자 갱신 결과가 랭킹 집계 종료일로 전달되지 않게 한다.
+    한 번 정한 UTC 집계 종료일을 사용자와 프로젝트 랭킹에 동일하게 적용한다.
     """
+    period_end = (
+        datetime.now(UTC).date() - timedelta(days=1)
+    ).isoformat()
     chain(
-        daily_update.si(),
-        calculate_daily_rankings.si(),
+        daily_update.si(period_end=period_end),
+        calculate_daily_rankings.si(period_end=period_end),
     ).apply_async()

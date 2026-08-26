@@ -1,4 +1,3 @@
-from collections.abc import Collection
 from datetime import date
 
 from django.db.models import (
@@ -12,6 +11,7 @@ from django.db.models import (
     Window,
 )
 from django.db.models.functions import Coalesce
+from django.db.models.query import QuerySet
 
 from .models import SixMonthUserRanking, User, UserActivity
 
@@ -63,13 +63,11 @@ def list_public_users(
     return results, User.objects.filter(is_superuser=False).count()
 
 
-def list_user_ranking_targets(
+def _user_ranking_targets(
     period_start: date,
     period_end: date,
-    *,
-    user_ids: Collection[int] | None = None,
-) -> list[User]:
-    """집계 기간의 사용자 활동 합계와 종료일 누적 Star를 조회한다."""
+) -> QuerySet[User]:
+    """집계 기간의 사용자 활동 지표를 포함한 QuerySet을 구성한다."""
     activity_in_period = Q(
         activities__activity_date__gte=period_start,
         activities__activity_date__lte=period_end,
@@ -83,13 +81,9 @@ def list_user_ranking_targets(
         .order_by("-activity_date", "-pk")
         .values("stars")[:1]
     )
-    users = User.objects.filter(is_superuser=False)
-    if user_ids is None:
-        users = users.filter(date_joined__date__lte=period_end)
-    else:
-        users = users.filter(pk__in=user_ids)
-    return list(
-        users.only(
+    return (
+        User.objects.filter(is_superuser=False)
+        .only(
             "id",
             "username",
             "date_joined",
@@ -114,6 +108,28 @@ def list_user_ranking_targets(
         )
         .order_by("username")
     )
+
+
+def list_user_ranking_targets(
+    period_start: date,
+    period_end: date,
+) -> list[User]:
+    """집계 종료일까지 가입한 사용자의 기간별 활동 지표를 조회한다."""
+    return list(
+        _user_ranking_targets(period_start, period_end).filter(
+            date_joined__date__lte=period_end,
+        )
+    )
+
+
+def get_user_ranking_target(
+    *,
+    user_id: int,
+    period_start: date,
+    period_end: date,
+) -> User:
+    """특정 사용자의 기간별 활동 지표를 가입일과 무관하게 조회한다."""
+    return _user_ranking_targets(period_start, period_end).get(pk=user_id)
 
 
 def list_six_month_user_ranking_cache(

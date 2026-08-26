@@ -75,6 +75,23 @@ class UserActivityStarSnapshotTests(TestCase):
 
         self.assertIsNone(activity.stars)
 
+    @patch("users.tasks.requests.post")
+    def test_collection_error_does_not_save_activity(self, post):
+        post.return_value.json.return_value = {
+            "errors": [{"message": "GitHub API failed"}],
+        }
+
+        with self.assertRaises(ValueError):
+            save_yesterday_contributions(
+                self.user,
+                stars=7,
+                activity_date=date(2026, 8, 25),
+            )
+
+        self.assertFalse(
+            UserActivity.objects.filter(user=self.user).exists()
+        )
+
     @patch("users.tasks.save_yesterday_contributions")
     @patch("users.tasks.get_initial_info")
     def test_daily_update_continues_after_user_collection_failure(
@@ -119,6 +136,42 @@ class UserActivityStarSnapshotTests(TestCase):
             period_end=save_yesterday_contributions.call_args.kwargs[
                 "activity_date"
             ],
+        )
+
+    @patch("users.tasks.refresh_user_ranking_caches")
+    @patch("users.tasks.save_yesterday_contributions")
+    @patch("users.tasks.get_initial_info")
+    def test_daily_update_continues_after_user_cache_failure(
+        self,
+        get_initial_info,
+        save_yesterday_contributions,
+        refresh_rankings,
+    ):
+        successful_user = get_user_model().objects.create_user(
+            username="cache-success",
+            github_email="cache-success@example.com",
+            name="캐시 성공 사용자",
+            student_id=5,
+            major="IT공학",
+        )
+        get_initial_info.return_value = {
+            "data": {
+                "user": {
+                    "repositories": {
+                        "nodes": [{"stargazerCount": 7}],
+                    }
+                }
+            }
+        }
+        refresh_rankings.side_effect = [RuntimeError("cache failed"), None]
+
+        daily_update.run(period_end="2026-08-25")
+
+        self.assertEqual(save_yesterday_contributions.call_count, 2)
+        self.assertEqual(refresh_rankings.call_count, 2)
+        refresh_rankings.assert_called_with(
+            user_id=successful_user.pk,
+            period_end=date(2026, 8, 25),
         )
 
     @patch("users.tasks.requests.post")
