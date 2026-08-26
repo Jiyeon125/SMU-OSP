@@ -16,10 +16,10 @@ from .services import (
 
 
 @shared_task
-def calculate_daily_rankings(
+def calculate_daily_project_rankings(
     period_end: str | None = None,
 ) -> int:
-    """지정일 또는 서비스 기준 전날의 저장 랭킹을 계산한다.
+    """지정일 또는 서비스 기준 전날의 프로젝트 랭킹을 계산한다.
 
     Args:
         period_end: ISO 8601 형식의 집계 종료일. 없으면 UTC 기준 전날.
@@ -64,5 +64,5 @@ def refresh_users_and_calculate_rankings() -> None:
     ).isoformat()
     chain(
         daily_update.si(period_end=period_end),
-        calculate_daily_rankings.si(period_end=period_end),
+        calculate_daily_project_rankings.si(period_end=period_end),
     ).apply_async()

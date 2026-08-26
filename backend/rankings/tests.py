@@ -27,7 +27,7 @@ from .services import (
     replace_daily_project_rankings,
 )
 from .tasks import (
-    calculate_daily_rankings,
+    calculate_daily_project_rankings,
     refresh_users_and_calculate_rankings,
 )
 
@@ -669,7 +669,7 @@ class ProjectRankingTaskTests(TestCase):
             six_month_projects,
         ]
 
-        result_count = calculate_daily_rankings.run(
+        result_count = calculate_daily_project_rankings.run(
             period_end="2026-08-13"
         )
 
@@ -698,7 +698,7 @@ class ProjectRankingTaskTests(TestCase):
         task_datetime.now.return_value = datetime(2026, 8, 14, 3, 10)
         calculate_projects.return_value = []
 
-        calculate_daily_rankings.run()
+        calculate_daily_project_rankings.run()
 
         task_datetime.now.assert_called_once_with(UTC)
         self.assertEqual(
@@ -740,7 +740,7 @@ class ProjectRankingTaskTests(TestCase):
             period_end=date(2026, 8, 13),
         )
         with self.assertRaises(RuntimeError):
-            calculate_daily_rankings.run(period_end="2026-08-13")
+            calculate_daily_project_rankings.run(period_end="2026-08-13")
 
         actual, count = list_project_rankings(start=0, limit=10)
         self.assertEqual(actual[0].project, project)
@@ -823,7 +823,7 @@ class ProjectRankingTaskTests(TestCase):
 
     @patch("rankings.tasks.datetime")
     @patch("rankings.tasks.chain")
-    @patch("rankings.tasks.calculate_daily_rankings.si")
+    @patch("rankings.tasks.calculate_daily_project_rankings.si")
     @patch("rankings.tasks.daily_update.si")
     def test_refreshes_users_before_calculating_rankings(
         self,
