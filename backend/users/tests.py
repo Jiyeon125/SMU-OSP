@@ -56,9 +56,15 @@ class UserActivityStarSnapshotTests(TestCase):
             }
         }
 
-        save_yesterday_contributions(self.user, stars=7)
+        activity_date = date(2026, 8, 25)
+        save_yesterday_contributions(
+            self.user,
+            stars=7,
+            activity_date=activity_date,
+        )
 
         activity = UserActivity.objects.get(user=self.user)
+        self.assertEqual(activity.activity_date, activity_date)
         self.assertEqual(activity.stars, 7)
         self.assertEqual(activity.commits, 3)
         self.assertEqual(activity.prs, 2)

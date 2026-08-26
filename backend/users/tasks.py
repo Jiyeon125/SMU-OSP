@@ -1,5 +1,5 @@
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import requests
 from celery import shared_task
@@ -200,25 +200,15 @@ def save_yesterday_contributions(
     user,
     stars,
     *,
-    activity_date=None,
+    activity_date: date,
 ):
     try:
         print("Start gathering yesterday contribution data")
 
-        yesterday = activity_date or (
-            datetime.now(UTC) - timedelta(days=1)
-        ).date()
+        print(f"yesterday: {activity_date}")
 
-        current_date = yesterday
-
-        print(f"yesterday: {yesterday}")
-
-        from_date = datetime.combine(current_date, datetime.min.time()).strftime(
-            "%Y-%m-%dT%H:%M:%SZ"
-        )
-        to_date = datetime.combine(current_date, datetime.max.time()).strftime(
-            "%Y-%m-%dT%H:%M:%SZ"
-        )
+        from_date = f"{activity_date}T00:00:00Z"
+        to_date = f"{activity_date}T23:59:59Z"
 
         print(f"from: {from_date} to: {to_date}, request start")
 
@@ -255,7 +245,7 @@ def save_yesterday_contributions(
         print("Saving data start")
         UserActivity.objects.update_or_create(
             user=user,
-            activity_date=current_date,
+            activity_date=activity_date,
             defaults={
                 "stars": stars,
                 "commits": commits,
@@ -263,7 +253,7 @@ def save_yesterday_contributions(
                 "issues": issues,
             },
         )
-        print(f"{yesterday} contribution saved")
+        print(f"{activity_date} contribution saved")
 
     except Exception as e:
         print(f"An error occurred: {e}")
