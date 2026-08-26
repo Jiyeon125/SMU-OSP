@@ -67,10 +67,8 @@ export interface ProjectApplicationHistory {
     projectName: string;
     projectStatus: ProjectStatus;
     id: number;
-    userId: number | null;
     status: ProjectApplicationStatus;
     description?: string | null;
-    joinedAt: string | null;
     createdAt: string;
     updatedAt: string;
 }

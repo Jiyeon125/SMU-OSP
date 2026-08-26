@@ -124,8 +124,21 @@ export const getProjectRankings = (start: number, limit: number) =>
         .get<ProjectRankingResponse>("rankings/projects", { params: { start, limit } })
         .then((response) => response.data);
 
-export const getProjectMemberships = () =>
-    instance.get("projects/members").then((response) => response.data);
+/**
+ * 로그인 사용자의 프로젝트 신청 이력을 조건에 따라 조회합니다.
+ * @param params 조회 조건
+ * @param params.start 조회 시작 위치
+ * @param params.limit 최대 조회 개수
+ * @param params.status 멤버 상태 필터
+ * @param params.sort 신청일 정렬 기준
+ * @returns 프로젝트 신청 이력 API 응답
+ */
+export const getProjectMemberships = (params: {
+    start: number;
+    limit: number;
+    status?: string;
+    sort: "latest" | "oldest";
+}) => instance.get("projects/members", { params }).then((response) => response.data);
 
 export const getProjectMembers = (projectId: string | number, manage = false) =>
     instance

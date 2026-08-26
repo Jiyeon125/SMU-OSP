@@ -2306,7 +2306,8 @@ class ProjectApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["status"], "SUCCESS")
-        self.assertIsNone(body["detail"])
+        self.assertEqual(body["detail"]["pagination"]["count"], 2)
+        self.assertEqual(body["detail"]["pagination"]["limit"], 12)
         self.assertEqual(
             [membership["id"] for membership in body["data"]],
             [pending.pk, declined.pk],
@@ -2318,9 +2319,38 @@ class ProjectApiTests(TestCase):
         self.assertEqual(body["data"][0]["projectId"], application_project.pk)
         self.assertEqual(body["data"][0]["projectName"], "Application Project")
         self.assertEqual(body["data"][0]["projectStatus"], Project.Status.ACTIVE)
-        self.assertEqual(body["data"][0]["userId"], self.user.pk)
+        self.assertNotIn("userId", body["data"][0])
+        self.assertNotIn("joinedAt", body["data"][0])
         self.assertIn("createdAt", body["data"][0])
         self.assertIn("updatedAt", body["data"][0])
+
+        filtered = self.client.get(
+            "/api/v1/projects/members"
+            "?start=0&limit=1&status=PENDING,DECLINED&sort=oldest"
+        )
+        self.assertEqual(filtered.status_code, 200)
+        self.assertEqual(filtered.json()["data"][0]["id"], declined.pk)
+        self.assertEqual(
+            filtered.json()["detail"]["pagination"]["count"],
+            2,
+        )
+
+    def test_project_membership_history_rejects_invalid_query(self):
+        self.client.force_login(self.user)
+
+        cases = (
+            ("start=-1", "INVALID_PAGINATION_PARAMETER"),
+            ("limit=0", "INVALID_PAGINATION_PARAMETER"),
+            ("limit=101", "INVALID_PAGINATION_PARAMETER"),
+            ("status=UNKNOWN", "INVALID_MEMBER_FILTER"),
+            ("sort=popular", "INVALID_MEMBER_FILTER"),
+        )
+        for query, expected_status in cases:
+            with self.subTest(query=query):
+                response = self.client.get(f"/api/v1/projects/members?{query}")
+
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json()["status"], expected_status)
 
     def test_project_membership_history_returns_empty_list(self):
         self.client.force_login(self.user)

@@ -133,14 +133,28 @@ export async function listProjectLanguages(): Promise<ApiResponse<string[]>> {
     }
 }
 
-export async function listProjectApplications(): Promise<ApiResponse<ProjectApplicationHistory[]>> {
+/**
+ * 프로젝트 신청 이력을 페이지 단위로 조회합니다.
+ * @param params 조회 조건
+ * @param params.start 조회 시작 위치
+ * @param params.limit 최대 조회 개수
+ * @param params.status 멤버 상태 필터
+ * @param params.sort 신청일 정렬 기준
+ * @returns 프로젝트 신청 이력 API 응답
+ */
+export async function listProjectApplications(params: {
+    start: number;
+    limit: number;
+    status?: string;
+    sort: "latest" | "oldest";
+}): Promise<ApiResponse<ProjectApplicationHistory[], PaginationDetail>> {
     try {
-        return await getProjectMemberships();
+        return await getProjectMemberships(params);
     } catch (e) {
         return toApiResponse<ProjectApplicationHistory[]>(
             e,
             "프로젝트 신청 내역 조회 중 오류가 발생했습니다.",
-        );
+        ) as ApiResponse<ProjectApplicationHistory[], PaginationDetail>;
     }
 }
 
