@@ -18,7 +18,7 @@ from .models import (
     RepositorySnapshot,
     RepositoryStatus,
 )
-from .serializers import RepositorySerializer
+from .serializers import ProjectDetailSerializer, RepositorySerializer
 from .tasks import (
     GITHUB_API_FAILED,
     PENDING,
@@ -821,9 +821,92 @@ class ProjectApiTests(TestCase):
         self.assertEqual(body["data"]["memberCount"], 1)
         self.assertFalse(body["data"]["canViewMembers"])
         self.assertFalse(body["data"]["canEdit"])
-        self.assertNotIn("canApply", body["data"])
-        self.assertNotIn("applicationStatus", body["data"])
+        self.assertFalse(body["data"]["canApply"])
+        self.assertIsNone(body["data"]["applicationStatus"])
+        self.assertEqual(body["data"]["pendingMemberCount"], 0)
         self.assertIsNone(body["data"]["members"])
+
+    def test_project_detail_serializer_does_not_query_member_fallback(self):
+        serializer = ProjectDetailSerializer(
+            self.project,
+            context={"can_view_members": True},
+        )
+
+        with self.assertNumQueries(0):
+            members = serializer.get_members(self.project)
+
+        self.assertEqual(members, [])
+
+    def test_project_detail_returns_pending_count_only_to_leader(self):
+        applicant = get_user_model().objects.create_user(
+            username="pending-count-applicant",
+            github_email="pending-count-applicant@example.com",
+            name="대기 신청자",
+            student_id=302,
+            major="IT공학",
+        )
+        Member.objects.create(
+            project=self.project,
+            user=applicant,
+            status=Member.Status.PENDING,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(f"/api/v1/projects/{self.project.pk}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["pendingMemberCount"], 1)
+
+        self.client.force_login(applicant)
+        response = self.client.get(f"/api/v1/projects/{self.project.pk}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["pendingMemberCount"], 0)
+
+    def test_project_detail_allows_eligible_user_to_apply(self):
+        applicant = get_user_model().objects.create_user(
+            username="eligible-applicant",
+            github_email="eligible-applicant@example.com",
+            name="신규 신청자",
+            student_id=303,
+            major="IT공학",
+        )
+        self.client.force_login(applicant)
+
+        response = self.client.get(f"/api/v1/projects/{self.project.pk}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["data"]["canApply"])
+
+    def test_project_detail_returns_current_application_state(self):
+        applicant = get_user_model().objects.create_user(
+            username="detail-applicant",
+            github_email="detail-applicant@example.com",
+            name="신청자",
+            student_id=301,
+            major="IT공학",
+        )
+        Member.objects.create(
+            project=self.project,
+            user=applicant,
+            status=Member.Status.CANCELED,
+        )
+        latest_application = Member.objects.create(
+            project=self.project,
+            user=applicant,
+            status=Member.Status.PENDING,
+        )
+        self.client.force_login(applicant)
+
+        response = self.client.get(f"/api/v1/projects/{self.project.pk}")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(
+            data["applicationStatus"],
+            latest_application.status,
+        )
+        self.assertFalse(data["canApply"])
 
     def test_deleted_project_detail_is_not_available(self):
         self.project.status = Project.Status.DELETED

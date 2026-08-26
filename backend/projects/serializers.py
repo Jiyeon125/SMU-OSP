@@ -459,13 +459,20 @@ class ProjectDetailSerializer(ProjectSerializer):
     memberCount = serializers.SerializerMethodField()
     canViewMembers = serializers.SerializerMethodField()
     canEdit = serializers.SerializerMethodField()
+    canApply = serializers.SerializerMethodField()
+    applicationStatus = serializers.SerializerMethodField()
+    pendingMemberCount = serializers.SerializerMethodField()
     members = serializers.SerializerMethodField()
 
     class Meta(ProjectSerializer.Meta):
-        fields = ProjectSerializer.Meta.fields + (
+        fields = (
+            *ProjectSerializer.Meta.fields,
             "memberCount",
             "canViewMembers",
             "canEdit",
+            "canApply",
+            "applicationStatus",
+            "pendingMemberCount",
             "members",
         )
 
@@ -478,17 +485,22 @@ class ProjectDetailSerializer(ProjectSerializer):
     def get_canEdit(self, obj):
         return bool(self.context.get("can_edit", False))
 
+    def get_canApply(self, obj):
+        return bool(self.context.get("can_apply", False))
+
+    def get_applicationStatus(self, obj):
+        memberships = getattr(obj, "request_user_application_history", [])
+        return memberships[0].status if memberships else None
+
+    def get_pendingMemberCount(self, obj):
+        if not self.get_canEdit(obj):
+            return 0
+        return obj.pending_member_count
+
     def get_members(self, obj):
         if not self.get_canViewMembers(obj):
             return None
         return ProjectMemberSerializer(self._joined_members(obj), many=True).data
 
     def _joined_members(self, obj):
-        joined_members = getattr(obj, "joined_members", None)
-        if joined_members is not None:
-            return joined_members
-        return list(
-            obj.members.filter(status=Member.Status.JOINED)
-            .select_related("user")
-            .order_by("-is_leader", "created_at", "pk")
-        )
+        return getattr(obj, "joined_members", [])
