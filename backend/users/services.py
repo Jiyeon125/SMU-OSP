@@ -3,7 +3,11 @@ from datetime import date, timedelta
 
 from django.db import transaction
 
-from common.dates import ranking_period_boundary
+from common.dates import (
+    ONE_YEAR_RANKING_DAYS,
+    SIX_MONTH_RANKING_DAYS,
+    ranking_period_boundary,
+)
 
 from .models import SixMonthUserRanking, User
 from .selectors import (
@@ -118,8 +122,12 @@ def refresh_user_ranking_caches(
     period_end: date,
 ) -> None:
     """한 사용자의 1년·6개월 랭킹 캐시를 함께 갱신한다."""
-    one_year_start = ranking_period_boundary(period_end, 365)
-    six_month_start = ranking_period_boundary(period_end, 180)
+    one_year_start = ranking_period_boundary(
+        period_end, ONE_YEAR_RANKING_DAYS
+    )
+    six_month_start = ranking_period_boundary(
+        period_end, SIX_MONTH_RANKING_DAYS
+    )
     one_year_user = get_user_ranking_target(
         user_id=user_id,
         period_start=one_year_start + timedelta(days=1),

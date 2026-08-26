@@ -2,7 +2,11 @@ from datetime import UTC, date, datetime, timedelta
 
 from celery import chain, shared_task
 
-from common.dates import ranking_period_boundary
+from common.dates import (
+    ONE_YEAR_RANKING_DAYS,
+    SIX_MONTH_RANKING_DAYS,
+    ranking_period_boundary,
+)
 from users.tasks import daily_update
 
 from .services import (
@@ -28,8 +32,12 @@ def calculate_daily_rankings(
         if period_end
         else datetime.now(UTC).date() - timedelta(days=1)
     )
-    one_year_period_start = ranking_period_boundary(target_date, 365)
-    six_month_period_start = ranking_period_boundary(target_date, 180)
+    one_year_period_start = ranking_period_boundary(
+        target_date, ONE_YEAR_RANKING_DAYS
+    )
+    six_month_period_start = ranking_period_boundary(
+        target_date, SIX_MONTH_RANKING_DAYS
+    )
     one_year_projects = calculate_project_rankings(
         one_year_period_start,
         target_date,
