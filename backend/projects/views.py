@@ -37,6 +37,7 @@ from .serializers import (
     ProjectMemberSerializer,
     ProjectMembershipHistorySerializer,
     ProjectMemberUpdateSerializer,
+    ProjectSerializer,
     ProjectUpdateSerializer,
 )
 from .services import (
