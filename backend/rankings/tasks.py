@@ -1,8 +1,6 @@
-from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo
+from datetime import UTC, date, datetime, timedelta
 
 from celery import chain, shared_task
-from django.conf import settings
 
 from common.dates import ranking_period_boundary
 from users.tasks import daily_update
@@ -28,8 +26,7 @@ def calculate_daily_rankings(
     target_date = (
         date.fromisoformat(period_end)
         if period_end
-        else datetime.now(ZoneInfo(settings.CELERY_TIMEZONE)).date()
-        - timedelta(days=1)
+        else datetime.now(UTC).date() - timedelta(days=1)
     )
     one_year_period_start = ranking_period_boundary(target_date, 365)
     six_month_period_start = ranking_period_boundary(target_date, 180)

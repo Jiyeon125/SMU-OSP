@@ -83,11 +83,10 @@ def list_user_ranking_targets(
         .order_by("-activity_date", "-pk")
         .values("stars")[:1]
     )
-    users = User.objects.filter(
-        is_superuser=False,
-        date_joined__date__lte=period_end,
-    )
-    if user_ids is not None:
+    users = User.objects.filter(is_superuser=False)
+    if user_ids is None:
+        users = users.filter(date_joined__date__lte=period_end)
+    else:
         users = users.filter(pk__in=user_ids)
     return list(
         users.only(

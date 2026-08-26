@@ -700,6 +700,7 @@ class ProjectRankingTaskTests(TestCase):
 
         calculate_daily_rankings.run()
 
+        task_datetime.now.assert_called_once_with(UTC)
         self.assertEqual(
             calculate_projects.call_args_list,
             [

@@ -258,6 +258,28 @@ class UserRankingCacheTests(TestCase):
         self.assertEqual(six_month.period_start, date(2026, 2, 27))
         self.assertEqual(six_month.period_end, date(2026, 8, 26))
 
+    def test_refreshes_caches_for_user_joined_after_period_end(self):
+        period_end = self.user.date_joined.date() - timedelta(days=1)
+        UserActivity.objects.create(
+            user=self.user,
+            activity_date=period_end,
+            stars=7,
+            commits=3,
+            prs=1,
+            issues=2,
+        )
+
+        refresh_user_ranking_caches(
+            user_id=self.user.pk,
+            period_end=period_end,
+        )
+
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.score, 13)
+        six_month = SixMonthUserRanking.objects.get(user=self.user)
+        self.assertEqual(six_month.total_score, 13)
+        self.assertEqual(six_month.period_end, period_end)
+
     def test_six_month_cache_excludes_180_day_boundary(self):
         UserActivity.objects.create(
             user=self.user,
