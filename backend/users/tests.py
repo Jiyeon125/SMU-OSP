@@ -141,6 +141,45 @@ class UserActivityStarSnapshotTests(TestCase):
     @patch("users.tasks.refresh_user_ranking_caches")
     @patch("users.tasks.save_yesterday_contributions")
     @patch("users.tasks.get_initial_info")
+    def test_daily_update_skips_cache_and_continues_after_activity_save_failure(
+        self,
+        get_initial_info,
+        save_yesterday_contributions,
+        refresh_rankings,
+    ):
+        get_user_model().objects.create_user(
+            username="activity-success",
+            github_email="activity-success@example.com",
+            name="활동 저장 성공 사용자",
+            student_id=4,
+            major="IT공학",
+        )
+        get_initial_info.return_value = {
+            "data": {
+                "user": {
+                    "repositories": {
+                        "nodes": [{"stargazerCount": 7}],
+                    }
+                }
+            }
+        }
+        save_yesterday_contributions.side_effect = [
+            RuntimeError("activity save failed"),
+            None,
+        ]
+
+        daily_update.run(period_end="2026-08-25")
+
+        self.assertEqual(save_yesterday_contributions.call_count, 2)
+        successful_user = save_yesterday_contributions.call_args_list[1].args[0]
+        refresh_rankings.assert_called_once_with(
+            user_id=successful_user.pk,
+            period_end=date(2026, 8, 25),
+        )
+
+    @patch("users.tasks.refresh_user_ranking_caches")
+    @patch("users.tasks.save_yesterday_contributions")
+    @patch("users.tasks.get_initial_info")
     def test_daily_update_continues_after_user_cache_failure(
         self,
         get_initial_info,
