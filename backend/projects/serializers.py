@@ -78,6 +78,20 @@ class RepositorySerializer(serializers.ModelSerializer):
         )
 
 
+class ProjectListRepositorySerializer(RepositorySerializer):
+    """프로젝트 목록에 필요한 Repository 정보만 변환한다."""
+
+    class Meta(RepositorySerializer.Meta):
+        fields = (
+            "fullName",
+            "stars",
+            "forks",
+            "languages",
+            "htmlUrl",
+            "fetchedAt",
+        )
+
+
 class BlankableURLField(serializers.URLField):
     default_error_messages = {
         **serializers.URLField.default_error_messages,
@@ -335,6 +349,28 @@ class ProjectSerializer(serializers.ModelSerializer):
             "techStack",
             "status",
             "maxMembers",
+            "repository",
+            "membershipRole",
+            "createdAt",
+            "updatedAt",
+        )
+
+
+class ProjectListSerializer(ProjectSerializer):
+    """프로젝트 목록 화면에 필요한 정보만 변환한다."""
+
+    repository = ProjectListRepositorySerializer(
+        read_only=True,
+        allow_null=True,
+    )
+
+    class Meta(ProjectSerializer.Meta):
+        fields = (
+            "id",
+            "name",
+            "description",
+            "techStack",
+            "status",
             "repository",
             "membershipRole",
             "createdAt",

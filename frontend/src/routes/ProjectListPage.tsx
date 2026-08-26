@@ -672,9 +672,7 @@ export default function ProjectListPage() {
                         </Box>
                         <Box as="td" p={3} borderBottomWidth={1} borderBottomColor={"smu.gray"}>
                           <Text fontSize={"sm"}>
-                            {p.repository?.languages?.join(", ") ||
-                              p.repository?.language ||
-                              "-"}
+                            {p.repository?.languages.join(", ") || "-"}
                           </Text>
                         </Box>
                         <Box as="td" p={3} borderBottomWidth={1} borderBottomColor={"smu.gray"}>

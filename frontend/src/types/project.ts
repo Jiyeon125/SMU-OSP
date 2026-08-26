@@ -21,36 +21,41 @@ export interface ProjectMemberUpdateInput {
     description?: string | null;
 }
 
-export interface Repository {
+/** 프로젝트 목록에서 사용하는 Repository 요약 정보입니다. */
+export interface ProjectListRepository {
+    fullName: string;
+    stars: number;
+    forks: number;
+    languages: string[];
+    htmlUrl: string;
+    fetchedAt: string | null;
+}
+
+export interface Repository extends ProjectListRepository {
     id: number;
     githubId: number;
     name: string;
-    fullName: string;
     description?: string | null;
-    stars: number;
-    forks: number;
     language?: string | null;
-    languages?: string[];
-    htmlUrl: string;
-    fetchedAt: string | null;
 }
 
 export interface Project {
     id: number;
     name: string;
     description: string;
-    demoUrl?: string | null;
-    presentationUrl?: string | null;
     techStack: string[];
     status: ProjectStatus;
-    maxMembers: number;
-    repository?: Repository | null;
+    repository?: ProjectListRepository | null;
     membershipRole?: "OWNER" | "MEMBER" | null;
     createdAt: string;
     updatedAt: string;
 }
 
 export interface ProjectDetail extends Project {
+    demoUrl?: string | null;
+    presentationUrl?: string | null;
+    maxMembers: number;
+    repository?: Repository | null;
     memberCount: number;
     canViewMembers: boolean;
     canEdit: boolean;
