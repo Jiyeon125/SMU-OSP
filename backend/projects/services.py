@@ -89,12 +89,10 @@ class ProjectCreationResult:
 
     Attributes:
         project: 생성된 프로젝트.
-        leader_member: 생성된 팀장 멤버십.
         repository_error: Repository 등록 실패 오류. 성공하면 None.
     """
 
     project: Project
-    leader_member: Member
     repository_error: RepositoryRegistrationError | None
 
 
@@ -263,7 +261,7 @@ def create_project(
                 "이미 등록된 프로젝트명입니다."
             ) from error
         project.languages.set(languages)
-        leader_member = Member.objects.create(
+        Member.objects.create(
             project=project,
             user=actor,
             is_leader=True,
@@ -278,6 +276,5 @@ def create_project(
 
     return ProjectCreationResult(
         project=project,
-        leader_member=leader_member,
         repository_error=repository_error,
     )

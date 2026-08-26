@@ -17,6 +17,7 @@ import {
     Project,
     ProjectApplicationHistory,
     ProjectCreateDetail,
+    ProjectCreateResult,
     ProjectDetail,
     ProjectDetailMember,
     ProjectInput,
@@ -230,14 +231,14 @@ export async function applyToProject(projectId: number): Promise<ApiResponse<nul
 
 export async function createProject(
     input: ProjectInput,
-): Promise<ApiResponse<Project, ProjectCreateDetail>> {
+): Promise<ApiResponse<ProjectCreateResult, ProjectCreateDetail>> {
     try {
         return await createProjectApi(input);
     } catch (e) {
-        return toApiResponse<Project>(e, "프로젝트 등록 중 오류가 발생했습니다.") as ApiResponse<
-            Project,
-            ProjectCreateDetail
-        >;
+        return toApiResponse<ProjectCreateResult>(
+            e,
+            "프로젝트 등록 중 오류가 발생했습니다.",
+        ) as ApiResponse<ProjectCreateResult, ProjectCreateDetail>;
     }
 }
 

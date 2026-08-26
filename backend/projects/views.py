@@ -37,7 +37,6 @@ from .serializers import (
     ProjectMemberSerializer,
     ProjectMembershipHistorySerializer,
     ProjectMemberUpdateSerializer,
-    ProjectSerializer,
     ProjectUpdateSerializer,
 )
 from .services import (
@@ -165,7 +164,6 @@ class Projects(APIView):
             )
 
         project = result.project
-        project.request_user_memberships = [result.leader_member]
         detail = None
         if result.repository_error is not None:
             error = result.repository_error
@@ -177,9 +175,8 @@ class Projects(APIView):
                 }
             }
 
-        _prepare_projects_for_serialization([project])
         return Response(
-            success(ProjectSerializer(project).data, detail),
+            success({"id": project.pk}, detail),
             status=status.HTTP_201_CREATED,
         )
 

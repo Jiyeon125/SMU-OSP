@@ -92,6 +92,11 @@ export interface ProjectCreateDetail {
     };
 }
 
+/** 프로젝트 생성 후 후속 이동에 필요한 응답입니다. */
+export interface ProjectCreateResult {
+    id: number;
+}
+
 export interface ProjectUpdateInput extends ProjectInput {
     status: "ACTIVE" | "FINISHED";
 }

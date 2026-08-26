@@ -698,8 +698,10 @@ class ProjectApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 201)
+        project = Project.objects.get(name="Language Project")
+        self.assertEqual(response.json()["data"], {"id": project.pk})
         self.assertEqual(
-            response.json()["data"]["techStack"],
+            list(project.languages.values_list("name", flat=True)),
             ["Python", "TypeScript"],
         )
         self.assertEqual(invalid_response.status_code, 400)
@@ -1302,20 +1304,8 @@ class ProjectApiTests(TestCase):
         self.assertEqual(response.status_code, 201)
         body = response.json()
         self.assertEqual(body["status"], "SUCCESS")
-        self.assertEqual(body["data"]["name"], "New Project")
-        self.assertNotIn("teamName", body["data"])
-        self.assertNotIn("teamId", body["data"])
-        self.assertNotIn("leaderId", body["data"])
-        self.assertNotIn("repositoryId", body["data"])
-        self.assertNotIn("repositoryUrl", body["data"])
-        self.assertEqual(body["data"]["status"], "ACTIVE")
-        self.assertEqual(body["data"]["maxMembers"], 5)
-        self.assertEqual(body["data"]["membershipRole"], "OWNER")
-        self.assertEqual(
-            body["data"]["repository"]["htmlUrl"],
-            "https://github.com/example/new-project",
-        )
         created_project = Project.objects.get(name="New Project")
+        self.assertEqual(body["data"], {"id": created_project.pk})
         self.assertEqual(created_project.max_members, 5)
         leader_member = created_project.members.get()
         self.assertEqual(leader_member.user, self.user)
@@ -1351,9 +1341,8 @@ class ProjectApiTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         body = response.json()
-        self.assertIsNone(body["data"]["repository"])
-        self.assertEqual(body["data"]["maxMembers"], 5)
         project = Project.objects.get(name="Project Without Repository")
+        self.assertEqual(body["data"], {"id": project.pk})
         self.assertEqual(project.max_members, 5)
         self.assertFalse(Repository.objects.filter(project=project).exists())
         self.assertTrue(project.members.get().is_leader)
@@ -1388,8 +1377,7 @@ class ProjectApiTests(TestCase):
             "존재하는 공개 GitHub Repository URL을 입력해주세요.",
         )
         project = Project.objects.get(name="Invalid Repository Project")
-        self.assertEqual(body["data"]["id"], project.pk)
-        self.assertIsNone(body["data"]["repository"])
+        self.assertEqual(body["data"], {"id": project.pk})
         self.assertFalse(
             Repository.objects.filter(project=project).exists()
         )
