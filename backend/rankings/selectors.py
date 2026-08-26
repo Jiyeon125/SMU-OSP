@@ -3,13 +3,14 @@ from datetime import date
 from django.db.models import (
     Count,
     Exists,
+    F,
     OuterRef,
     Prefetch,
     Q,
     Subquery,
     Window,
 )
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, RowNumber
 
 from projects.models import Project, RepositorySnapshot
 
@@ -30,16 +31,25 @@ def list_project_rankings(
         .only(
             "project_id",
             "project__name",
-            "rank",
             "total_score",
             "stars",
             "forks",
             "commits",
             "pull_requests",
         )
-        .annotate(total_count=Window(Count("project_id")))
+        .annotate(
+            rank=Window(
+                expression=RowNumber(),
+                order_by=(
+                    F("total_score").desc(),
+                    F("project__name").asc(),
+                    F("project_id").asc(),
+                ),
+            ),
+            total_count=Window(Count("project_id")),
+        )
         .order_by(
-            "rank",
+            "-total_score",
             "project__name",
             "project_id",
         )
@@ -63,15 +73,24 @@ def list_six_month_project_rankings(
         .only(
             "project_id",
             "project__name",
-            "rank",
             "total_score",
             "stars",
             "forks",
             "commits",
             "pull_requests",
         )
-        .annotate(total_count=Window(Count("project_id")))
-        .order_by("rank", "project__name", "project_id")
+        .annotate(
+            rank=Window(
+                expression=RowNumber(),
+                order_by=(
+                    F("total_score").desc(),
+                    F("project__name").asc(),
+                    F("project_id").asc(),
+                ),
+            ),
+            total_count=Window(Count("project_id")),
+        )
+        .order_by("-total_score", "project__name", "project_id")
     )
     results = list(rankings[start : start + limit])
     if results:

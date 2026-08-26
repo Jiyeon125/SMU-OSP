@@ -151,9 +151,9 @@ def calculate_project_rankings(
         )
     )
 
-    return [
-        ProjectRanking(
-            rank=rank,
+    rankings = []
+    for rank, item in enumerate(metrics, start=1):
+        ranking = ProjectRanking(
             project=item.project,
             total_score=item.total_score,
             stars=item.stars,
@@ -163,8 +163,9 @@ def calculate_project_rankings(
             period_start=item.period_start,
             period_end=period_end,
         )
-        for rank, item in enumerate(metrics, start=1)
-    ]
+        ranking.rank = rank
+        rankings.append(ranking)
+    return rankings
 
 
 @transaction.atomic
@@ -182,7 +183,6 @@ def replace_daily_project_rankings(
         [
             SixMonthProjectRanking(
                 project_id=result.project_id,
-                rank=result.rank,
                 total_score=result.total_score,
                 stars=result.stars,
                 forks=result.forks,

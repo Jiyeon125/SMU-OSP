@@ -16,7 +16,6 @@ class ProjectRanking(CommonModel):
         primary_key=True,
         related_name="ranking",
     )
-    rank = models.PositiveIntegerField()
     total_score = models.DecimalField(max_digits=30, decimal_places=2)
     stars = models.PositiveIntegerField(default=0)
     forks = models.PositiveIntegerField(default=0)
@@ -26,7 +25,7 @@ class ProjectRanking(CommonModel):
     period_end = models.DateField()
 
     class Meta:
-        ordering = ("rank", "project__name", "project_id")
+        ordering = ("-total_score", "project__name", "project_id")
 
 
 class SixMonthProjectRanking(CommonModel):
@@ -38,7 +37,6 @@ class SixMonthProjectRanking(CommonModel):
         primary_key=True,
         related_name="six_month_ranking",
     )
-    rank = models.PositiveIntegerField()
     total_score = models.DecimalField(max_digits=30, decimal_places=2)
     stars = models.PositiveIntegerField(default=0)
     forks = models.PositiveIntegerField(default=0)
@@ -48,4 +46,4 @@ class SixMonthProjectRanking(CommonModel):
     period_end = models.DateField()
 
     class Meta:
-        ordering = ("rank", "project__name", "project_id")
+        ordering = ("-total_score", "project__name", "project_id")

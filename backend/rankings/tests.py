@@ -345,7 +345,6 @@ class ProjectRankingApiTests(TestCase):
         ProjectRanking.objects.bulk_create(
             [
                 ProjectRanking(
-                    rank=1,
                     project_id=project.pk,
                     total_score=Decimal("12.50"),
                     stars=2,
@@ -400,7 +399,6 @@ class ProjectRankingApiTests(TestCase):
             )
             rankings.append(
                 ProjectRanking(
-                    rank=rank,
                     project_id=project.pk,
                     total_score=Decimal("1.00"),
                     stars=1,
@@ -450,28 +448,47 @@ class ProjectRankingApiTests(TestCase):
         )
 
     def test_returns_saved_six_month_project_rankings_by_default(self):
-        project = Project.objects.create(
+        first_project = Project.objects.create(
+            name="상위 6개월 프로젝트",
+            description="상위 6개월 프로젝트 설명",
+        )
+        second_project = Project.objects.create(
             name="6개월 프로젝트",
             description="6개월 프로젝트 설명",
         )
-        SixMonthProjectRanking.objects.create(
-            project=project,
-            rank=1,
-            total_score=Decimal("8.00"),
-            stars=3,
-            forks=0,
-            commits=5,
-            pull_requests=0,
-            period_start=date(2026, 2, 20),
-            period_end=date(2026, 8, 20),
+        SixMonthProjectRanking.objects.bulk_create(
+            [
+                SixMonthProjectRanking(
+                    project=first_project,
+                    total_score=Decimal("9.00"),
+                    period_start=date(2026, 2, 20),
+                    period_end=date(2026, 8, 20),
+                ),
+                SixMonthProjectRanking(
+                    project=second_project,
+                    total_score=Decimal("8.00"),
+                    stars=3,
+                    forks=0,
+                    commits=5,
+                    pull_requests=0,
+                    period_start=date(2026, 2, 20),
+                    period_end=date(2026, 8, 20),
+                ),
+            ]
         )
 
         with self.assertNumQueries(1):
-            response = self.client.get("/api/v1/rankings/projects")
+            response = self.client.get(
+                "/api/v1/rankings/projects",
+                {"start": 1, "limit": 1},
+            )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["data"][0]["projectId"], project.pk)
-        self.assertEqual(response.json()["data"][0]["commits"], 5)
+        body = response.json()
+        self.assertEqual(body["data"][0]["projectId"], second_project.pk)
+        self.assertEqual(body["data"][0]["rank"], 2)
+        self.assertEqual(body["data"][0]["commits"], 5)
+        self.assertEqual(body["detail"]["pagination"]["count"], 2)
         self.assertEqual(ProjectRanking.objects.count(), 0)
 
     def test_rejects_invalid_ranking_period(self):
@@ -699,7 +716,6 @@ class ProjectRankingTaskTests(TestCase):
     def test_failed_calculation_keeps_last_stored_result(self, _):
         expected = [
             ProjectRanking(
-                rank=1,
                 project_id=1,
                 total_score=Decimal("1.00"),
                 stars=1,
@@ -718,7 +734,6 @@ class ProjectRankingTaskTests(TestCase):
         ProjectRanking.objects.bulk_create(expected)
         SixMonthProjectRanking.objects.create(
             project=project,
-            rank=1,
             total_score=Decimal("2.00"),
             period_start=date(2026, 2, 13),
             period_end=date(2026, 8, 13),
@@ -741,7 +756,6 @@ class ProjectRankingTaskTests(TestCase):
             description="교체 실패 프로젝트 설명",
         )
         expected = ProjectRanking(
-            rank=1,
             project_id=project.pk,
             total_score=Decimal("1.00"),
             stars=1,
@@ -754,7 +768,6 @@ class ProjectRankingTaskTests(TestCase):
         ProjectRanking.objects.bulk_create([expected])
         SixMonthProjectRanking.objects.create(
             project=project,
-            rank=1,
             total_score=Decimal("2.00"),
             period_start=date(2026, 2, 13),
             period_end=date(2026, 8, 13),
@@ -786,14 +799,12 @@ class ProjectRankingTaskTests(TestCase):
         )
         one_year_project = ProjectRanking(
             project=project,
-            rank=1,
             total_score=Decimal("10.00"),
             period_start=date(2025, 8, 20),
             period_end=date(2026, 8, 20),
         )
         six_month_project = ProjectRanking(
             project=project,
-            rank=1,
             total_score=Decimal("5.00"),
             period_start=date(2026, 2, 20),
             period_end=date(2026, 8, 20),
