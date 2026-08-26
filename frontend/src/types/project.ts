@@ -32,9 +32,6 @@ export interface ProjectListRepository {
 }
 
 export interface Repository extends ProjectListRepository {
-    id: number;
-    githubId: number;
-    name: string;
     description?: string | null;
     language?: string | null;
 }

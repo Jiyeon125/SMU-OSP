@@ -14,7 +14,6 @@ MAX_LIST_ITEM_LENGTH = 100
 
 
 class RepositorySerializer(serializers.ModelSerializer):
-    githubId = serializers.IntegerField(source="github_id")
     fullName = serializers.CharField(source="full_name")
     htmlUrl = serializers.URLField(source="html_url")
     description = serializers.SerializerMethodField()
@@ -64,9 +63,6 @@ class RepositorySerializer(serializers.ModelSerializer):
     class Meta:
         model = Repository
         fields = (
-            "id",
-            "githubId",
-            "name",
             "fullName",
             "description",
             "stars",
