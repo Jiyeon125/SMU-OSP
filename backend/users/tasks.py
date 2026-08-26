@@ -209,12 +209,22 @@ def save_previous_contributions(user, created_at):
 
 
 def save_yesterday_contributions(
-    user,
-    stars,
+    user: User,
+    stars: int,
     *,
     activity_date: date,
-):
-    """지정한 UTC 날짜의 사용자 활동과 누적 Star를 저장한다."""
+) -> None:
+    """지정한 UTC 날짜의 사용자 활동과 누적 Star를 저장한다.
+
+    Args:
+        user: 활동을 수집할 사용자.
+        stars: 집계 시점에 사용자가 보유한 누적 Star 수.
+        activity_date: 활동을 수집하고 저장할 UTC 날짜.
+
+    Raises:
+        requests.RequestException: GitHub 요청 또는 응답 처리에 실패한 경우.
+        ValueError: GitHub GraphQL 응답에 오류가 포함된 경우.
+    """
     print("Start gathering yesterday contribution data")
 
     print(f"yesterday: {activity_date}")
