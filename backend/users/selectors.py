@@ -1,6 +1,19 @@
-from django.db.models import Count, Window
+from collections.abc import Collection
+from datetime import date
 
-from .models import User
+from django.db.models import (
+    Count,
+    IntegerField,
+    OuterRef,
+    Q,
+    Subquery,
+    Sum,
+    Value,
+    Window,
+)
+from django.db.models.functions import Coalesce
+
+from .models import SixMonthUserRanking, User, UserActivity
 
 SORT_FIELDS = {
     "commit": "commits",
@@ -48,3 +61,86 @@ def list_public_users(
     if start == 0:
         return results, 0
     return results, User.objects.filter(is_superuser=False).count()
+
+
+def list_user_ranking_targets(
+    period_start: date,
+    period_end: date,
+    *,
+    user_ids: Collection[int] | None = None,
+) -> list[User]:
+    """집계 기간의 사용자 활동 합계와 종료일 누적 Star를 조회한다."""
+    activity_in_period = Q(
+        activities__activity_date__gte=period_start,
+        activities__activity_date__lte=period_end,
+    )
+    latest_stars = (
+        UserActivity.objects.filter(
+            user_id=OuterRef("pk"),
+            activity_date__lte=period_end,
+            stars__isnull=False,
+        )
+        .order_by("-activity_date", "-pk")
+        .values("stars")[:1]
+    )
+    users = User.objects.filter(
+        is_superuser=False,
+        date_joined__date__lte=period_end,
+    )
+    if user_ids is not None:
+        users = users.filter(pk__in=user_ids)
+    return list(
+        users.only(
+            "id",
+            "username",
+            "date_joined",
+        )
+        .annotate(
+            ranking_stars=Coalesce(
+                Subquery(latest_stars, output_field=IntegerField()),
+                Value(0),
+            ),
+            ranking_commits=Coalesce(
+                Sum("activities__commits", filter=activity_in_period),
+                Value(0),
+            ),
+            ranking_prs=Coalesce(
+                Sum("activities__prs", filter=activity_in_period),
+                Value(0),
+            ),
+            ranking_issues=Coalesce(
+                Sum("activities__issues", filter=activity_in_period),
+                Value(0),
+            ),
+        )
+        .order_by("username")
+    )
+
+
+def list_six_month_user_ranking_cache(
+    *,
+    start: int,
+    limit: int,
+) -> tuple[list[SixMonthUserRanking], int]:
+    """6개월 사용자 랭킹 캐시를 점수순으로 페이지 조회한다."""
+    rankings = (
+        SixMonthUserRanking.objects.select_related("user")
+        .only(
+            "user_id",
+            "user__username",
+            "user__date_joined",
+            "total_score",
+            "stars",
+            "commits",
+            "pull_requests",
+            "issues",
+        )
+        .annotate(total_count=Window(Count("user_id")))
+        .order_by("-total_score", "user__username", "user_id")
+    )
+    results = list(rankings[start : start + limit])
+    if results:
+        return results, results[0].total_count
+    if start == 0:
+        return results, 0
+    return results, SixMonthUserRanking.objects.count()

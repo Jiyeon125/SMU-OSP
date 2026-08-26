@@ -4,19 +4,19 @@ from rest_framework.views import APIView
 
 from common.pagination import pagination_detail
 from common.responses import fail, success
+from users.services import (
+    list_saved_user_rankings,
+    list_six_month_user_rankings,
+)
 
 from .forms import RankingQueryForm
 from .selectors import (
     list_project_rankings,
     list_six_month_project_rankings,
-    list_six_month_user_rankings,
 )
 from .serializers import (
     ProjectRankingResultSerializer,
     UserRankingResultSerializer,
-)
-from .services import (
-    list_saved_user_rankings,
 )
 
 

@@ -9,12 +9,12 @@ from django.template.response import TemplateResponse
 from import_export import fields, resources
 from import_export.admin import ExportMixin
 
+from users.services import UserRankingResult, calculate_user_rankings
+
 from .forms import RankingReportForm
 from .models import ProjectRanking
 from .services import (
-    UserRankingResult,
     calculate_project_rankings,
-    calculate_user_rankings,
 )
 
 

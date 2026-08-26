@@ -29,28 +29,6 @@ class ProjectRanking(CommonModel):
         ordering = ("rank", "project__name", "project_id")
 
 
-class SixMonthUserRanking(CommonModel):
-    """사용자별 마지막 정상 6개월 랭킹 결과."""
-
-    user = models.OneToOneField(
-        "users.User",
-        on_delete=models.CASCADE,
-        primary_key=True,
-        related_name="six_month_ranking",
-    )
-    rank = models.PositiveIntegerField()
-    total_score = models.PositiveBigIntegerField(default=0)
-    stars = models.PositiveIntegerField(default=0)
-    commits = models.PositiveIntegerField(default=0)
-    pull_requests = models.PositiveIntegerField(default=0)
-    issues = models.PositiveIntegerField(default=0)
-    period_start = models.DateField()
-    period_end = models.DateField()
-
-    class Meta:
-        ordering = ("rank", "user__username", "user_id")
-
-
 class SixMonthProjectRanking(CommonModel):
     """프로젝트별 마지막 정상 6개월 랭킹 결과."""
 

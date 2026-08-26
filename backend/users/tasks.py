@@ -6,6 +6,7 @@ from celery import shared_task
 from django.conf import settings
 
 from users.models import User, UserActivity
+from users.services import refresh_user_ranking_caches
 
 GITHUB_API_URL = "https://api.github.com/graphql"
 
@@ -43,13 +44,16 @@ def daily_update():
             continue
 
         print(data)
-        user.stars = stars
-        user.save()
-
-        save_yesterday_contributions(user, stars)
-
-        user.update_contributions()
-        user.update_score()
+        period_end = (datetime.now(UTC) - timedelta(days=1)).date()
+        save_yesterday_contributions(
+            user,
+            stars,
+            activity_date=period_end,
+        )
+        refresh_user_ranking_caches(
+            user_id=user.pk,
+            period_end=period_end,
+        )
         print(f"User {user.username} updated")
 
     print("All users updated")
@@ -76,10 +80,16 @@ def initial_process(username):
 
     save_previous_contributions(user, github_account_created_at)
 
-    user.stars = stars
-    user.save()
-    user.update_contributions()
-    user.update_score()
+    period_end = (datetime.now(UTC) - timedelta(days=1)).date()
+    UserActivity.objects.update_or_create(
+        user=user,
+        activity_date=period_end,
+        defaults={"stars": stars},
+    )
+    refresh_user_ranking_caches(
+        user_id=user.pk,
+        period_end=period_end,
+    )
 
 
 def get_initial_info(username):
@@ -166,12 +176,12 @@ def save_previous_contributions(user, created_at):
             print(f"from: {from_date} to: {to_date}, request {requests_number} times")
 
             print("Saving data start")
-            userActivity = UserActivity.objects.create(user=user)
-            userActivity.activity_date = current_date
-            userActivity.commits = commits
-            userActivity.prs = prs
-            userActivity.issues = issues
-            userActivity.save()
+            user_activity = UserActivity.objects.create(user=user)
+            user_activity.activity_date = current_date
+            user_activity.commits = commits
+            user_activity.prs = prs
+            user_activity.issues = issues
+            user_activity.save()
             print("Done")
 
             requests_number += 1
@@ -186,11 +196,18 @@ def save_previous_contributions(user, created_at):
         print(f"An error occurred: {e}")
 
 
-def save_yesterday_contributions(user, stars):
+def save_yesterday_contributions(
+    user,
+    stars,
+    *,
+    activity_date=None,
+):
     try:
         print("Start gathering yesterday contribution data")
 
-        yesterday = (datetime.now(UTC) - timedelta(days=1)).date()
+        yesterday = activity_date or (
+            datetime.now(UTC) - timedelta(days=1)
+        ).date()
 
         current_date = yesterday
 
@@ -236,14 +253,16 @@ def save_yesterday_contributions(user, stars):
             print(f"Commits: {commits}, PRs: {prs}, Issues: {issues}")
 
         print("Saving data start")
-        userActivity = UserActivity.objects.create(
-            user=user, activity_date=current_date, stars=stars
+        UserActivity.objects.update_or_create(
+            user=user,
+            activity_date=current_date,
+            defaults={
+                "stars": stars,
+                "commits": commits,
+                "prs": prs,
+                "issues": issues,
+            },
         )
-        # userActivity.activity_date = current_date
-        userActivity.commits = commits
-        userActivity.prs = prs
-        userActivity.issues = issues
-        userActivity.save()
         print(f"{yesterday} contribution saved")
 
     except Exception as e:

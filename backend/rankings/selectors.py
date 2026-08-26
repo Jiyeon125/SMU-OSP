@@ -3,75 +3,20 @@ from datetime import date
 from django.db.models import (
     Count,
     Exists,
-    IntegerField,
     OuterRef,
     Prefetch,
     Q,
     Subquery,
-    Sum,
-    Value,
     Window,
 )
 from django.db.models.functions import Coalesce
 
 from projects.models import Project, RepositorySnapshot
-from users.models import User, UserActivity
 
 from .models import (
     ProjectRanking,
     SixMonthProjectRanking,
-    SixMonthUserRanking,
 )
-
-
-def list_user_ranking_targets(
-    period_start: date,
-    period_end: date,
-) -> list[User]:
-    """집계 기간의 활동 합계와 종료일 누적 Star를 함께 조회한다."""
-    activity_in_period = Q(
-        activities__activity_date__gte=period_start,
-        activities__activity_date__lte=period_end,
-    )
-    latest_stars = (
-        UserActivity.objects.filter(
-            user_id=OuterRef("pk"),
-            activity_date__lte=period_end,
-            stars__isnull=False,
-        )
-        .order_by("-activity_date", "-pk")
-        .values("stars")[:1]
-    )
-    return list(
-        User.objects.filter(
-            is_superuser=False,
-            date_joined__date__lte=period_end,
-        )
-        .only(
-            "id",
-            "username",
-            "date_joined",
-        )
-        .annotate(
-            ranking_stars=Coalesce(
-                Subquery(latest_stars, output_field=IntegerField()),
-                Value(0),
-            ),
-            ranking_commits=Coalesce(
-                Sum("activities__commits", filter=activity_in_period),
-                Value(0),
-            ),
-            ranking_prs=Coalesce(
-                Sum("activities__prs", filter=activity_in_period),
-                Value(0),
-            ),
-            ranking_issues=Coalesce(
-                Sum("activities__issues", filter=activity_in_period),
-                Value(0),
-            ),
-        )
-        .order_by("username")
-    )
 
 
 def list_project_rankings(
@@ -105,36 +50,6 @@ def list_project_rankings(
     if start == 0:
         return results, 0
     return results, ProjectRanking.objects.count()
-
-
-def list_six_month_user_rankings(
-    *,
-    start: int,
-    limit: int,
-) -> tuple[list[SixMonthUserRanking], int]:
-    """마지막 정상 6개월 사용자 랭킹의 요청 구간을 조회한다."""
-    rankings = (
-        SixMonthUserRanking.objects.select_related("user")
-        .only(
-            "user_id",
-            "user__username",
-            "user__date_joined",
-            "rank",
-            "total_score",
-            "stars",
-            "commits",
-            "pull_requests",
-            "issues",
-        )
-        .annotate(total_count=Window(Count("user_id")))
-        .order_by("rank", "user__username", "user_id")
-    )
-    results = list(rankings[start : start + limit])
-    if results:
-        return results, results[0].total_count
-    if start == 0:
-        return results, 0
-    return results, SixMonthUserRanking.objects.count()
 
 
 def list_six_month_project_rankings(
