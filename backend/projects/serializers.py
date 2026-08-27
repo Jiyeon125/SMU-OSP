@@ -405,6 +405,32 @@ class ProjectMemberSerializer(serializers.ModelSerializer):
         return "LEADER" if obj.is_leader else "MEMBER"
 
 
+class ProjectMemberListSerializer(ProjectMemberSerializer):
+    """일반 멤버 목록에 필요한 정보만 변환한다."""
+
+    class Meta(ProjectMemberSerializer.Meta):
+        fields = (
+            "id",
+            "username",
+            "name",
+            "role",
+            "joinedAt",
+        )
+
+
+class ProjectMemberManagementSerializer(ProjectMemberSerializer):
+    createdAt = serializers.DateTimeField(source="created_at")
+
+    class Meta(ProjectMemberSerializer.Meta):
+        fields = (
+            "id",
+            "name",
+            "status",
+            "description",
+            "createdAt",
+        )
+
+
 class ProjectMemberUpdateSerializer(serializers.Serializer):
     status = serializers.ChoiceField(
         choices=(

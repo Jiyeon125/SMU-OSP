@@ -19,9 +19,9 @@ import {
     ProjectCreateDetail,
     ProjectCreateResult,
     ProjectDetail,
-    ProjectDetailMember,
     ProjectInput,
     ProjectMemberUpdateInput,
+    ProjectPendingMember,
     ProjectUpdateInput,
 } from "../types/project";
 
@@ -158,14 +158,18 @@ export async function listProjectApplications(params: {
     }
 }
 
-export async function listProjectMembers(
+/**
+ * 프로젝트 관리 화면에 표시할 승인 대기 신청자만 조회합니다.
+ * @param projectId 조회할 프로젝트 ID
+ * @returns 승인 대기 신청자 API 응답
+ */
+export async function listPendingProjectMembers(
     projectId: number,
-    manage = false,
-): Promise<ApiResponse<ProjectDetailMember[]>> {
+): Promise<ApiResponse<ProjectPendingMember[]>> {
     try {
-        return await getProjectMembers(projectId, manage);
+        return await getProjectMembers(projectId, true, "PENDING");
     } catch (e) {
-        return toApiResponse<ProjectDetailMember[]>(
+        return toApiResponse<ProjectPendingMember[]>(
             e,
             "프로젝트 멤버 조회 중 오류가 발생했습니다.",
         );

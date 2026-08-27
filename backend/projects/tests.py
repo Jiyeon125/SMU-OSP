@@ -2570,6 +2570,14 @@ class ProjectApiTests(TestCase):
             {member["id"] for member in response.json()["data"]},
             {self.member.pk, joined.pk},
         )
+        member = response.json()["data"][0]
+        self.assertIn("username", member)
+        self.assertIn("role", member)
+        self.assertIn("joinedAt", member)
+        self.assertNotIn("userId", member)
+        self.assertNotIn("status", member)
+        self.assertNotIn("description", member)
+        self.assertNotIn("createdAt", member)
         self.assertEqual(denied.status_code, 403)
         self.assertEqual(update_denied.status_code, 403)
         self.assertEqual(
@@ -2586,12 +2594,24 @@ class ProjectApiTests(TestCase):
         managed_members = {
             member["id"]: member for member in managed.json()["data"]
         }
-        self.assertEqual(managed_members[joined.pk]["username"], "joined-user")
+        self.assertEqual(managed_members[joined.pk]["name"], "참여자")
         self.assertIn(pending.pk, managed_members)
         self.assertIn("description", managed_members[pending.pk])
         self.assertIsNone(managed_members[pending.pk]["description"])
         self.assertIn("createdAt", managed_members[pending.pk])
-        self.assertIsNone(managed_members[pending.pk]["joinedAt"])
+        self.assertNotIn("username", managed_members[pending.pk])
+        self.assertNotIn("role", managed_members[pending.pk])
+        self.assertNotIn("joinedAt", managed_members[pending.pk])
+
+        pending_only = self.client.get(
+            f"/api/v1/projects/{self.project.pk}/members"
+            "?manage=true&status=PENDING"
+        )
+        self.assertEqual(pending_only.status_code, 200)
+        self.assertEqual(
+            [member["id"] for member in pending_only.json()["data"]],
+            [pending.pk],
+        )
 
     def test_project_members_reject_invalid_manage_filter(self):
         self.client.force_login(self.user)
@@ -2606,6 +2626,34 @@ class ProjectApiTests(TestCase):
             response.json()["detail"]["message"],
             "manage는 true 또는 false여야 합니다.",
         )
+
+    def test_project_members_reject_status_filter_without_manage(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            f"/api/v1/projects/{self.project.pk}/members?status=PENDING"
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["status"], "INVALID_MEMBER_FILTER")
+        self.assertEqual(
+            response.json()["detail"]["message"],
+            (
+                "status는 유효한 멤버 상태이며 manage=true일 때만 "
+                "사용할 수 있습니다."
+            ),
+        )
+
+    def test_project_members_reject_unknown_status_filter(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            f"/api/v1/projects/{self.project.pk}/members"
+            "?manage=true&status=UNKNOWN"
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["status"], "INVALID_MEMBER_FILTER")
 
     def test_non_member_cannot_list_project_members(self):
         outsider = get_user_model().objects.create_user(

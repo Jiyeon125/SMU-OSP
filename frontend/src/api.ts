@@ -2,6 +2,7 @@ import Cookie from "js-cookie";
 import axios from "axios";
 import { ILogin, IUser, PublicUserListResponse, TrendingRepositoryListResponse } from "./types";
 import type {
+    ProjectApplicationStatus,
     ProjectInput,
     ProjectMemberUpdateInput,
     ProjectRankingResponse,
@@ -140,10 +141,24 @@ export const getProjectMemberships = (params: {
     sort: "latest" | "oldest";
 }) => instance.get("projects/members", { params }).then((response) => response.data);
 
-export const getProjectMembers = (projectId: string | number, manage = false) =>
+/**
+ * 프로젝트 멤버를 조회합니다.
+ * @param projectId 조회할 프로젝트 ID
+ * @param manage 팀장용 관리 조회 여부
+ * @param status 관리 조회에 적용할 멤버 상태
+ * @returns 프로젝트 멤버 API 응답
+ */
+export const getProjectMembers = (
+    projectId: string | number,
+    manage = false,
+    status?: ProjectApplicationStatus,
+) =>
     instance
         .get(`projects/${projectId}/members`, {
-            params: manage ? { manage: true } : undefined,
+            params: {
+                ...(manage && { manage: true }),
+                ...(status && { status }),
+            },
         })
         .then((response) => response.data);
 

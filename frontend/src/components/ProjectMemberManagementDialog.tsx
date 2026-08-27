@@ -4,7 +4,7 @@ import { useState } from "react";
 import {
     approveProjectMember,
     declineProjectMember,
-    listProjectMembers,
+    listPendingProjectMembers,
 } from "../services/projectService";
 import { PROJECT_APPLICATION_STATUS_LABEL } from "../types/project";
 import { formatDateTimeKST } from "../utils/date";
@@ -39,7 +39,7 @@ export default function ProjectMemberManagementDialog({
 
     const membersQuery = useQuery({
         queryKey: ["project-members", projectId, "manage"],
-        queryFn: () => listProjectMembers(projectId, true),
+        queryFn: () => listPendingProjectMembers(projectId),
         enabled: open,
     });
 
@@ -80,8 +80,7 @@ export default function ProjectMemberManagementDialog({
     });
 
     const response = membersQuery.data;
-    const members = response?.status === "SUCCESS" ? response.data : [];
-    const pendingMembers = members.filter((member) => member.status === "PENDING");
+    const pendingMembers = response?.status === "SUCCESS" ? response.data : [];
 
     const changeStatus = (memberId: number, approve: boolean) => {
         const action = approve ? "승인" : "반려";

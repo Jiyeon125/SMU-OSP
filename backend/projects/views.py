@@ -38,7 +38,8 @@ from .serializers import (
     ProjectDetailSerializer,
     ProjectListSerializer,
     ProjectMemberDescriptionSerializer,
-    ProjectMemberSerializer,
+    ProjectMemberListSerializer,
+    ProjectMemberManagementSerializer,
     ProjectMembershipHistorySerializer,
     ProjectMemberUpdateSerializer,
     ProjectUpdateSerializer,
@@ -435,24 +436,30 @@ class ProjectMembers(APIView):
                 ),
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        manage = query_form.to_query().manage
+        query = query_form.to_query()
 
         try:
             require_project_access(
                 project_id=pk,
                 user_id=request.user.pk,
-                manage=manage,
+                manage=query.manage,
             )
         except ProjectPermissionDenied as error:
             return _project_permission_denied_response(error)
 
         members = list_project_members(
             project_id=pk,
-            joined_only=not manage,
+            manage=query.manage,
+            status=query.status,
         )
 
+        serializer_class = (
+            ProjectMemberManagementSerializer
+            if query.manage
+            else ProjectMemberListSerializer
+        )
         return Response(
-            success(ProjectMemberSerializer(members, many=True).data),
+            success(serializer_class(members, many=True).data),
             status=status.HTTP_200_OK,
         )
 

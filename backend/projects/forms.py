@@ -53,6 +53,7 @@ class ProjectListQuery:
 @dataclass(frozen=True)
 class ProjectMemberQuery:
     manage: bool
+    status: str | None
 
 
 @dataclass(frozen=True)
@@ -188,6 +189,13 @@ class ProjectMemberQueryForm(ApiQueryForm):
             "INVALID_MEMBER_FILTER",
             "manage는 true 또는 false여야 합니다.",
         ),
+        "status": QueryApiError(
+            "INVALID_MEMBER_FILTER",
+            (
+                "status는 유효한 멤버 상태이며 manage=true일 때만 "
+                "사용할 수 있습니다."
+            ),
+        ),
     }
     default_api_error = QueryApiError(
         "INVALID_MEMBER_FILTER",
@@ -195,11 +203,27 @@ class ProjectMemberQueryForm(ApiQueryForm):
     )
 
     manage = QueryBooleanField(required=False)
+    status = forms.ChoiceField(
+        choices=Member.Status.choices,
+        required=False,
+    )
+
+    def clean(self) -> dict[str, Any]:
+        cleaned_data = super().clean()
+        if cleaned_data.get("status") and not cleaned_data.get("manage"):
+            self.add_error(
+                "status",
+                forms.ValidationError("invalid", code="manage_required"),
+            )
+        return cleaned_data
 
     def to_query(self) -> ProjectMemberQuery:
         if not self.is_valid():
             raise ValueError("유효한 입력만 ProjectMemberQuery로 변환할 수 있습니다.")
-        return ProjectMemberQuery(manage=self.cleaned_data["manage"])
+        return ProjectMemberQuery(
+            manage=self.cleaned_data["manage"],
+            status=self.cleaned_data["status"] or None,
+        )
 
 
 class MembershipHistoryQueryForm(ApiQueryForm):
