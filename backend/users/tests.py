@@ -5,7 +5,10 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from users.models import SixMonthUserRanking, UserActivity
-from users.services import refresh_user_ranking_caches
+from users.services import (
+    calculate_user_rankings,
+    refresh_user_ranking_caches,
+)
 from users.tasks import (
     daily_update,
     initial_process,
@@ -347,7 +350,7 @@ class UserRankingCacheTests(TestCase):
         self.assertEqual(six_month.pull_requests, 1)
         self.assertEqual(six_month.issues, 2)
         self.assertEqual(six_month.total_score, 13)
-        self.assertEqual(six_month.period_start, date(2026, 2, 27))
+        self.assertEqual(six_month.period_start, date(2026, 2, 28))
         self.assertEqual(six_month.period_end, date(2026, 8, 26))
 
     def test_refreshes_caches_for_user_joined_after_period_end(self):
@@ -372,7 +375,7 @@ class UserRankingCacheTests(TestCase):
         self.assertEqual(six_month.total_score, 13)
         self.assertEqual(six_month.period_end, period_end)
 
-    def test_six_month_cache_excludes_180_day_boundary(self):
+    def test_six_month_cache_matches_admin_period_calculation(self):
         UserActivity.objects.create(
             user=self.user,
             activity_date=date(2026, 2, 27),
@@ -390,8 +393,14 @@ class UserRankingCacheTests(TestCase):
         )
 
         six_month = SixMonthUserRanking.objects.get(user=self.user)
+        admin_result = calculate_user_rankings(
+            six_month.period_start,
+            six_month.period_end,
+        )[0]
+
         self.assertEqual(six_month.commits, 1)
-        self.assertEqual(six_month.period_start, date(2026, 2, 27))
+        self.assertEqual(six_month.period_start, date(2026, 2, 28))
+        self.assertEqual(admin_result.commits, six_month.commits)
 
     def test_one_year_cache_preserves_365_day_window(self):
         UserActivity.objects.create(

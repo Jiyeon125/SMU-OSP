@@ -124,18 +124,18 @@ def refresh_user_ranking_caches(
     """한 사용자의 1년·6개월 랭킹 캐시를 함께 갱신한다."""
     one_year_start = ranking_period_boundary(
         period_end, ONE_YEAR_RANKING_DAYS
-    )
+    ) + timedelta(days=1)
     six_month_start = ranking_period_boundary(
         period_end, SIX_MONTH_RANKING_DAYS
-    )
+    ) + timedelta(days=1)
     one_year_user = get_user_ranking_target(
         user_id=user_id,
-        period_start=one_year_start + timedelta(days=1),
+        period_start=one_year_start,
         period_end=period_end,
     )
     six_month_user = get_user_ranking_target(
         user_id=user_id,
-        period_start=six_month_start + timedelta(days=1),
+        period_start=six_month_start,
         period_end=period_end,
     )
     one_year_values = _ranking_values(one_year_user)

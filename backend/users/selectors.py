@@ -114,12 +114,8 @@ def list_user_ranking_targets(
     period_start: date,
     period_end: date,
 ) -> list[User]:
-    """집계 종료일까지 가입한 사용자의 기간별 활동 지표를 조회한다."""
-    return list(
-        _user_ranking_targets(period_start, period_end).filter(
-            date_joined__date__lte=period_end,
-        )
-    )
+    """현재 가입 사용자의 기간별 활동 지표를 조회한다."""
+    return list(_user_ranking_targets(period_start, period_end))
 
 
 def get_user_ranking_target(
