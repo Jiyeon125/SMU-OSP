@@ -7,13 +7,12 @@ from django.core.exceptions import ImproperlyConfigured
 from django.db import transaction
 
 from projects.models import Project
-from users.models import User
 
-from .models import ProjectRanking
-from .selectors import (
-    list_project_ranking_targets,
-    list_user_ranking_targets,
+from .models import (
+    ProjectRanking,
+    SixMonthProjectRanking,
 )
+from .selectors import list_project_ranking_targets
 
 SCORE_QUANTUM = Decimal("0.01")
 
@@ -121,69 +120,6 @@ class ProjectRankingMetrics:
         )
 
 
-@dataclass(frozen=True)
-class UserRankingResult:
-    """관리자 기간 조회에 사용하는 사용자 랭킹 결과."""
-
-    user: User
-    rank: int
-    total_score: int
-    stars: int
-    commits: int
-    pull_requests: int
-    issues: int
-
-
-def calculate_user_rankings(
-    period_start: date,
-    period_end: date,
-) -> list[UserRankingResult]:
-    """지정 기간의 사용자 활동 합계와 종료일 누적 Star로 순위를 계산한다."""
-    users = list_user_ranking_targets(period_start, period_end)
-    metrics = []
-    for user in users:
-        stars = int(user.ranking_stars)
-        commits = int(user.ranking_commits)
-        pull_requests = int(user.ranking_prs)
-        issues = int(user.ranking_issues)
-        total_score = stars + commits + pull_requests + issues
-        metrics.append(
-            (
-                user,
-                total_score,
-                stars,
-                commits,
-                pull_requests,
-                issues,
-            )
-        )
-    metrics.sort(
-        key=lambda item: (
-            -item[1],
-            item[0].username,
-        )
-    )
-    return [
-        UserRankingResult(
-            user=user,
-            rank=rank,
-            total_score=total_score,
-            stars=stars,
-            commits=commits,
-            pull_requests=pull_requests,
-            issues=issues,
-        )
-        for rank, (
-            user,
-            total_score,
-            stars,
-            commits,
-            pull_requests,
-            issues,
-        ) in enumerate(metrics, start=1)
-    ]
-
-
 def calculate_project_rankings(
     period_start: date,
     period_end: date,
@@ -215,29 +151,46 @@ def calculate_project_rankings(
         )
     )
 
-    results = []
-    previous_score = None
-    current_rank = 0
-    for position, item in enumerate(metrics, start=1):
-        if item.total_score != previous_score:
-            current_rank = position
-            previous_score = item.total_score
-        results.append(
-            ProjectRanking(
-                rank=current_rank,
-                project=item.project,
-                total_score=item.total_score,
-                stars=item.stars,
-                forks=item.forks,
-                commits=item.commits,
-                pull_requests=item.pull_requests,
-                period_start=item.period_start,
-                period_end=period_end,
-            )
+    rankings = []
+    for rank, item in enumerate(metrics, start=1):
+        ranking = ProjectRanking(
+            project=item.project,
+            total_score=item.total_score,
+            stars=item.stars,
+            forks=item.forks,
+            commits=item.commits,
+            pull_requests=item.pull_requests,
+            period_start=item.period_start,
+            period_end=period_end,
         )
-    return results
+        ranking.rank = rank
+        rankings.append(ranking)
+    return rankings
+
+
 @transaction.atomic
-def replace_project_rankings(results: list[ProjectRanking]) -> None:
-    """마지막 정상 프로젝트 랭킹을 한 번에 교체한다."""
+def replace_daily_project_rankings(
+    *,
+    one_year_projects: list[ProjectRanking],
+    six_month_projects: list[ProjectRanking],
+) -> None:
+    """일별 1년·6개월 프로젝트 랭킹 결과를 함께 교체한다."""
     ProjectRanking.objects.all().delete()
-    ProjectRanking.objects.bulk_create(results)
+    SixMonthProjectRanking.objects.all().delete()
+
+    ProjectRanking.objects.bulk_create(one_year_projects)
+    SixMonthProjectRanking.objects.bulk_create(
+        [
+            SixMonthProjectRanking(
+                project_id=result.project_id,
+                total_score=result.total_score,
+                stars=result.stars,
+                forks=result.forks,
+                commits=result.commits,
+                pull_requests=result.pull_requests,
+                period_start=result.period_start,
+                period_end=result.period_end,
+            )
+            for result in six_month_projects
+        ]
+    )

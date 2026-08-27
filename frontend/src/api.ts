@@ -1,6 +1,13 @@
 import Cookie from "js-cookie";
 import axios from "axios";
-import { ILogin, IUser, PublicUserListResponse, TrendingRepositoryListResponse } from "./types";
+import {
+    ILogin,
+    IUser,
+    PublicUserListResponse,
+    RankingPeriod,
+    TrendingRepositoryListResponse,
+    UserRankingResponse,
+} from "./types";
 import type {
     ProjectInput,
     ProjectMemberUpdateInput,
@@ -73,6 +80,21 @@ export const getTrendingRepositories = () =>
         .get<TrendingRepositoryListResponse>("trending/repositories")
         .then((response) => response.data);
 
+/**
+ * 선택한 기간의 사용자 랭킹을 조회합니다.
+ *
+ * @param start 조회를 시작할 순번
+ * @param limit 반환할 최대 결과 수
+ * @param period 조회할 집계기간
+ * @returns 사용자 랭킹 API 응답
+ */
+export const getUserRankings = (start: number, limit: number, period: RankingPeriod) =>
+    instance
+        .get<UserRankingResponse>("rankings/users", {
+            params: { start, limit, period },
+        })
+        .then((response) => response.data);
+
 export const getProjects = ({
     start = null,
     limit = null,
@@ -114,14 +136,18 @@ export const getProjectLanguages = () =>
     instance.get("projects/languages").then((response) => response.data);
 
 /**
- * 마지막으로 정상 계산된 1년 프로젝트 랭킹을 조회합니다.
+ * 선택한 기간의 프로젝트 랭킹을 조회합니다.
+ *
  * @param start 조회를 시작할 순번
  * @param limit 반환할 최대 결과 수
+ * @param period 조회할 집계기간
  * @returns 프로젝트 랭킹 API 응답
  */
-export const getProjectRankings = (start: number, limit: number) =>
+export const getProjectRankings = (start: number, limit: number, period: RankingPeriod) =>
     instance
-        .get<ProjectRankingResponse>("rankings/projects", { params: { start, limit } })
+        .get<ProjectRankingResponse>("rankings/projects", {
+            params: { start, limit, period },
+        })
         .then((response) => response.data);
 
 export const getProjectMemberships = () =>

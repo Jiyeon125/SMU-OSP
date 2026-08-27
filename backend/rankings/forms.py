@@ -4,15 +4,16 @@ from django import forms
 
 
 @dataclass(frozen=True)
-class ProjectRankingQuery:
-    """검증된 프로젝트 랭킹 페이지 조회 조건."""
+class RankingQuery:
+    """검증된 랭킹 페이지 조회 조건."""
 
     start: int
     limit: int
+    period: str
 
 
-class ProjectRankingQueryForm(forms.Form):
-    """프로젝트 랭킹 페이지 query parameter를 검증한다."""
+class RankingQueryForm(forms.Form):
+    """랭킹 페이지 query parameter를 검증한다."""
 
     start = forms.IntegerField(required=False, min_value=0)
     limit = forms.IntegerField(
@@ -20,8 +21,15 @@ class ProjectRankingQueryForm(forms.Form):
         min_value=1,
         max_value=100,
     )
+    period = forms.ChoiceField(
+        required=False,
+        choices=(
+            ("6m", "6개월"),
+            ("1y", "1년"),
+        ),
+    )
 
-    def to_query(self) -> ProjectRankingQuery:
+    def to_query(self) -> RankingQuery:
         """검증 결과를 랭킹 조회 조건으로 변환한다.
 
         Returns:
@@ -32,11 +40,12 @@ class ProjectRankingQueryForm(forms.Form):
         """
         if not self.is_valid():
             raise ValueError(
-                "유효한 입력만 ProjectRankingQuery로 변환할 수 있습니다."
+                "유효한 입력만 RankingQuery로 변환할 수 있습니다."
             )
-        return ProjectRankingQuery(
+        return RankingQuery(
             start=self.cleaned_data["start"] or 0,
             limit=self.cleaned_data["limit"] or 100,
+            period=self.cleaned_data["period"] or "6m",
         )
 
 

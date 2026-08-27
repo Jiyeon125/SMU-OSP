@@ -1,6 +1,6 @@
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import call, patch
 from urllib.parse import urlencode
 
 from django.conf import settings
@@ -8,21 +8,28 @@ from django.core.exceptions import ImproperlyConfigured
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
+from common.dates import ranking_period_boundary
 from projects.models import (
     Project,
     Repository,
     RepositorySnapshot,
 )
-from users.models import User, UserActivity
+from users.models import SixMonthUserRanking, User, UserActivity
+from users.services import calculate_user_rankings
 
-from .models import ProjectRanking
+from .models import (
+    ProjectRanking,
+    SixMonthProjectRanking,
+)
 from .selectors import list_project_ranking_targets, list_project_rankings
 from .services import (
     calculate_project_rankings,
-    calculate_user_rankings,
-    replace_project_rankings,
+    replace_daily_project_rankings,
 )
-from .tasks import calculate_daily_project_rankings
+from .tasks import (
+    calculate_daily_project_rankings,
+    refresh_users_and_calculate_rankings,
+)
 
 
 class ProjectRankingCalculationTests(TestCase):
@@ -242,7 +249,7 @@ class ProjectRankingCalculationTests(TestCase):
             {repository.project_id for repository in repositories},
         )
 
-    def test_assigns_competition_ranks_and_name_order(self):
+    def test_assigns_sequential_ranks_and_name_order(self):
         project_ids = {}
         for name, stars in (
             ("나 프로젝트", 5),
@@ -277,7 +284,7 @@ class ProjectRankingCalculationTests(TestCase):
             [(result.rank, result.project_id) for result in results],
             [
                 (1, project_ids["가 프로젝트"]),
-                (1, project_ids["나 프로젝트"]),
+                (2, project_ids["나 프로젝트"]),
                 (3, project_ids["다 프로젝트"]),
             ],
         )
@@ -335,10 +342,9 @@ class ProjectRankingApiTests(TestCase):
             name="API 프로젝트",
             description="API 프로젝트 설명",
         )
-        replace_project_rankings(
+        ProjectRanking.objects.bulk_create(
             [
                 ProjectRanking(
-                    rank=1,
                     project_id=project.pk,
                     total_score=Decimal("12.50"),
                     stars=2,
@@ -352,7 +358,10 @@ class ProjectRankingApiTests(TestCase):
         )
 
         with self.assertNumQueries(1):
-            response = self.client.get("/api/v1/rankings/projects")
+            response = self.client.get(
+                "/api/v1/rankings/projects",
+                {"period": "1y"},
+            )
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
@@ -390,7 +399,6 @@ class ProjectRankingApiTests(TestCase):
             )
             rankings.append(
                 ProjectRanking(
-                    rank=rank,
                     project_id=project.pk,
                     total_score=Decimal("1.00"),
                     stars=1,
@@ -401,12 +409,12 @@ class ProjectRankingApiTests(TestCase):
                     period_end=date(2026, 8, 13),
                 )
             )
-        replace_project_rankings(rankings)
+        ProjectRanking.objects.bulk_create(rankings)
 
         with self.assertNumQueries(1):
             response = self.client.get(
                 "/api/v1/rankings/projects",
-                {"start": 5, "limit": 5},
+                {"start": 5, "limit": 5, "period": "1y"},
             )
 
         self.assertEqual(response.status_code, 200)
@@ -439,49 +447,268 @@ class ProjectRankingApiTests(TestCase):
             response.json()["status"], "INVALID_PAGINATION_PARAMETER"
         )
 
+    def test_returns_saved_six_month_project_rankings_by_default(self):
+        first_project = Project.objects.create(
+            name="상위 6개월 프로젝트",
+            description="상위 6개월 프로젝트 설명",
+        )
+        second_project = Project.objects.create(
+            name="6개월 프로젝트",
+            description="6개월 프로젝트 설명",
+        )
+        SixMonthProjectRanking.objects.bulk_create(
+            [
+                SixMonthProjectRanking(
+                    project=first_project,
+                    total_score=Decimal("9.00"),
+                    period_start=date(2026, 2, 20),
+                    period_end=date(2026, 8, 20),
+                ),
+                SixMonthProjectRanking(
+                    project=second_project,
+                    total_score=Decimal("8.00"),
+                    stars=3,
+                    forks=0,
+                    commits=5,
+                    pull_requests=0,
+                    period_start=date(2026, 2, 20),
+                    period_end=date(2026, 8, 20),
+                ),
+            ]
+        )
+
+        with self.assertNumQueries(1):
+            response = self.client.get(
+                "/api/v1/rankings/projects",
+                {"start": 1, "limit": 1},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["data"][0]["projectId"], second_project.pk)
+        self.assertEqual(body["data"][0]["rank"], 2)
+        self.assertEqual(body["data"][0]["commits"], 5)
+        self.assertEqual(body["detail"]["pagination"]["count"], 2)
+        self.assertEqual(ProjectRanking.objects.count(), 0)
+
+    def test_rejects_invalid_ranking_period(self):
+        response = self.client.get(
+            "/api/v1/rankings/projects",
+            {"period": "3m"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["status"], "INVALID_RANKING_PERIOD")
+
+
+class UserRankingApiTests(TestCase):
+    def test_returns_saved_one_year_user_rankings(self):
+        top_user = User.objects.create_user(
+            username="saved-top-user",
+            password="password",
+            github_email="saved-top@example.com",
+            name="저장 랭킹 1위",
+            student_id=20260001,
+            major="컴퓨터과학",
+            score=20,
+            stars=5,
+            commits=6,
+            prs=4,
+            issues=5,
+        )
+        User.objects.create_user(
+            username="saved-second-user",
+            password="password",
+            github_email="saved-second@example.com",
+            name="저장 랭킹 2위",
+            student_id=20260002,
+            major="컴퓨터과학",
+            score=10,
+        )
+        UserActivity.objects.create(
+            user=top_user,
+            activity_date=date(2026, 8, 20),
+            stars=100,
+            commits=100,
+            prs=100,
+            issues=100,
+        )
+
+        with self.assertNumQueries(1):
+            response = self.client.get(
+                "/api/v1/rankings/users",
+                {"period": "1y", "limit": 1},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["data"][0]["username"], top_user.username)
+        self.assertEqual(body["data"][0]["totalScore"], 20)
+        self.assertEqual(body["data"][0]["stars"], 5)
+        self.assertEqual(body["data"][0]["pullRequests"], 4)
+        self.assertEqual(body["detail"]["pagination"]["count"], 2)
+
+    def test_derives_one_year_rank_after_pagination(self):
+        for index, score in enumerate((20, 10)):
+            User.objects.create_user(
+                username=f"one-year-user-{index}",
+                password="password",
+                github_email=f"one-year-{index}@example.com",
+                name=f"1년 사용자 {index}",
+                student_id=20260020 + index,
+                major="컴퓨터과학",
+                score=score,
+            )
+
+        with self.assertNumQueries(1):
+            response = self.client.get(
+                "/api/v1/rankings/users",
+                {"period": "1y", "start": 1, "limit": 1},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["data"][0]["rank"], 2)
+        self.assertEqual(body["data"][0]["username"], "one-year-user-1")
+        self.assertEqual(body["detail"]["pagination"]["count"], 2)
+
+    def test_returns_saved_six_month_user_rankings_by_default(self):
+        user = User.objects.create_user(
+            username="six-month-user",
+            password="password",
+            github_email="six-month@example.com",
+            name="6개월 사용자",
+            student_id=20260001,
+            major="컴퓨터과학",
+            score=999,
+            stars=999,
+            commits=999,
+            prs=999,
+            issues=999,
+        )
+        SixMonthUserRanking.objects.create(
+            user=user,
+            total_score=10,
+            stars=4,
+            commits=3,
+            pull_requests=2,
+            issues=1,
+            period_start=date(2026, 2, 20),
+            period_end=date(2026, 8, 20),
+        )
+        UserActivity.objects.create(
+            user=user,
+            activity_date=date(2026, 8, 20),
+            stars=100,
+            commits=100,
+            prs=100,
+            issues=100,
+        )
+
+        with self.assertNumQueries(1):
+            response = self.client.get("/api/v1/rankings/users")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["data"][0]["rank"], 1)
+        self.assertEqual(body["data"][0]["username"], user.username)
+        self.assertEqual(body["data"][0]["totalScore"], 10)
+        self.assertEqual(body["data"][0]["pullRequests"], 2)
+        self.assertEqual(body["detail"]["pagination"]["count"], 1)
+
+    def test_derives_six_month_rank_after_pagination(self):
+        users = [
+            User.objects.create_user(
+                username=f"six-month-user-{index}",
+                password="password",
+                github_email=f"six-month-{index}@example.com",
+                name=f"6개월 사용자 {index}",
+                student_id=20260010 + index,
+                major="컴퓨터과학",
+            )
+            for index in range(2)
+        ]
+        for user, score in zip(users, (20, 10), strict=True):
+            SixMonthUserRanking.objects.create(
+                user=user,
+                total_score=score,
+                period_start=date(2026, 2, 20),
+                period_end=date(2026, 8, 20),
+            )
+
+        response = self.client.get(
+            "/api/v1/rankings/users",
+            {"start": 1, "limit": 1},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["data"][0]["rank"], 2)
+        self.assertEqual(body["data"][0]["username"], users[1].username)
+        self.assertEqual(body["detail"]["pagination"]["count"], 2)
+
+    def test_uses_fixed_180_day_period_boundary(self):
+        self.assertEqual(
+            ranking_period_boundary(date(2026, 8, 31), 180),
+            date(2026, 3, 4),
+        )
+
 
 class ProjectRankingTaskTests(TestCase):
-    @patch("rankings.tasks.replace_project_rankings")
+    @patch("rankings.tasks.replace_daily_project_rankings")
     @patch("rankings.tasks.calculate_project_rankings")
     def test_calculates_independently_of_repository_refresh_state(
         self,
-        calculate_rankings,
+        calculate_projects,
         replace_rankings,
     ):
-        calculate_rankings.return_value = [object(), object()]
+        one_year_projects = [object(), object()]
+        six_month_projects = [object()]
+        calculate_projects.side_effect = [
+            one_year_projects,
+            six_month_projects,
+        ]
 
         result_count = calculate_daily_project_rankings.run(
             period_end="2026-08-13"
         )
 
-        self.assertEqual(result_count, 2)
-        calculate_rankings.assert_called_once_with(
-            date(2025, 8, 13),
-            date(2026, 8, 13),
+        self.assertEqual(result_count, 3)
+        self.assertEqual(
+            calculate_projects.call_args_list,
+            [
+                call(date(2025, 8, 13), date(2026, 8, 13)),
+                call(date(2026, 2, 14), date(2026, 8, 13)),
+            ],
         )
         replace_rankings.assert_called_once_with(
-            calculate_rankings.return_value
+            one_year_projects=one_year_projects,
+            six_month_projects=six_month_projects,
         )
 
-    @patch("rankings.tasks.replace_project_rankings")
+    @patch("rankings.tasks.replace_daily_project_rankings")
     @patch("rankings.tasks.calculate_project_rankings")
     @patch("rankings.tasks.datetime")
     def test_default_period_excludes_current_day(
         self,
         task_datetime,
-        calculate_rankings,
+        calculate_projects,
         replace_rankings,
     ):
         task_datetime.now.return_value = datetime(2026, 8, 14, 3, 10)
-        calculate_rankings.return_value = []
+        calculate_projects.return_value = []
 
         calculate_daily_project_rankings.run()
 
-        calculate_rankings.assert_called_once_with(
-            date(2025, 8, 13),
-            date(2026, 8, 13),
+        task_datetime.now.assert_called_once_with(UTC)
+        self.assertEqual(
+            calculate_projects.call_args_list,
+            [
+                call(date(2025, 8, 13), date(2026, 8, 13)),
+                call(date(2026, 2, 14), date(2026, 8, 13)),
+            ],
         )
-        replace_rankings.assert_called_once_with([])
+        replace_rankings.assert_called_once()
 
     @patch(
         "rankings.tasks.calculate_project_rankings",
@@ -490,7 +717,6 @@ class ProjectRankingTaskTests(TestCase):
     def test_failed_calculation_keeps_last_stored_result(self, _):
         expected = [
             ProjectRanking(
-                rank=1,
                 project_id=1,
                 total_score=Decimal("1.00"),
                 stars=1,
@@ -506,8 +732,13 @@ class ProjectRankingTaskTests(TestCase):
             name="마지막 정상 프로젝트",
             description="마지막 정상 프로젝트 설명",
         )
-        replace_project_rankings(expected)
-
+        ProjectRanking.objects.bulk_create(expected)
+        SixMonthProjectRanking.objects.create(
+            project=project,
+            total_score=Decimal("2.00"),
+            period_start=date(2026, 2, 13),
+            period_end=date(2026, 8, 13),
+        )
         with self.assertRaises(RuntimeError):
             calculate_daily_project_rankings.run(period_end="2026-08-13")
 
@@ -515,14 +746,17 @@ class ProjectRankingTaskTests(TestCase):
         self.assertEqual(actual[0].project, project)
         self.assertEqual(actual[0].total_score, Decimal("1.00"))
         self.assertEqual(count, 1)
+        self.assertEqual(
+            SixMonthProjectRanking.objects.get().total_score,
+            2,
+        )
 
-    def test_failed_replacement_keeps_last_stored_result(self):
+    def test_failed_project_replacement_keeps_both_stored_results(self):
         project = Project.objects.create(
             name="교체 실패 프로젝트",
             description="교체 실패 프로젝트 설명",
         )
         expected = ProjectRanking(
-            rank=1,
             project_id=project.pk,
             total_score=Decimal("1.00"),
             stars=1,
@@ -532,29 +766,103 @@ class ProjectRankingTaskTests(TestCase):
             period_start=date(2025, 8, 13),
             period_end=date(2026, 8, 13),
         )
-        replace_project_rankings([expected])
-
+        ProjectRanking.objects.bulk_create([expected])
+        SixMonthProjectRanking.objects.create(
+            project=project,
+            total_score=Decimal("2.00"),
+            period_start=date(2026, 2, 13),
+            period_end=date(2026, 8, 13),
+        )
         with (
             patch(
-                "rankings.services.ProjectRanking.objects.bulk_create",
+                "rankings.services.SixMonthProjectRanking.objects.bulk_create",
                 side_effect=RuntimeError("replacement failed"),
             ),
             self.assertRaises(RuntimeError),
         ):
-            replace_project_rankings([])
+            replace_daily_project_rankings(
+                one_year_projects=[],
+                six_month_projects=[],
+            )
 
         ranking = ProjectRanking.objects.get()
         self.assertEqual(ranking.project, project)
         self.assertEqual(ranking.total_score, Decimal("1.00"))
+        self.assertEqual(
+            SixMonthProjectRanking.objects.get().total_score,
+            2,
+        )
 
-    def test_ranking_beat_schedule_runs_once_at_six(self):
+    def test_replaces_one_year_and_six_month_project_results_together(self):
+        project = Project.objects.create(
+            name="기간별 저장 프로젝트",
+            description="기간별 저장 프로젝트 설명",
+        )
+        one_year_project = ProjectRanking(
+            project=project,
+            total_score=Decimal("10.00"),
+            period_start=date(2025, 8, 20),
+            period_end=date(2026, 8, 20),
+        )
+        six_month_project = ProjectRanking(
+            project=project,
+            total_score=Decimal("5.00"),
+            period_start=date(2026, 2, 20),
+            period_end=date(2026, 8, 20),
+        )
+        replace_daily_project_rankings(
+            one_year_projects=[one_year_project],
+            six_month_projects=[six_month_project],
+        )
+
+        self.assertEqual(ProjectRanking.objects.get().total_score, 10)
+        self.assertEqual(
+            SixMonthProjectRanking.objects.get().total_score,
+            5,
+        )
+
+    @patch("rankings.tasks.datetime")
+    @patch("rankings.tasks.chain")
+    @patch("rankings.tasks.calculate_daily_project_rankings.si")
+    @patch("rankings.tasks.daily_update.si")
+    def test_refreshes_users_before_calculating_rankings(
+        self,
+        user_update_signature,
+        ranking_signature,
+        task_chain,
+        task_datetime,
+    ):
+        task_datetime.now.return_value = datetime(2026, 8, 26, 3, 10)
+        user_update_signature.return_value = "user-update"
+        ranking_signature.return_value = "ranking-update"
+
+        refresh_users_and_calculate_rankings.run()
+
+        task_datetime.now.assert_called_once_with(UTC)
+        user_update_signature.assert_called_once_with(
+            period_end="2026-08-25"
+        )
+        ranking_signature.assert_called_once_with(
+            period_end="2026-08-25"
+        )
+        task_chain.assert_called_once_with(
+            "user-update",
+            "ranking-update",
+        )
+        task_chain.return_value.apply_async.assert_called_once_with()
+
+    def test_ranking_beat_schedule_runs_after_user_refresh(self):
         ranking = settings.CELERY_BEAT_SCHEDULE["project-ranking"]
         self.assertEqual(
             ranking["task"],
-            "rankings.tasks.calculate_daily_project_rankings",
+            "rankings.tasks.refresh_users_and_calculate_rankings",
         )
         self.assertEqual(ranking["schedule"].minute, {0})
         self.assertEqual(ranking["schedule"].hour, {6})
+
+        user_update = settings.CELERY_BEAT_SCHEDULE["daily-update"]
+        self.assertEqual(user_update["schedule"].minute, {0})
+        self.assertEqual(user_update["schedule"].hour, {0, 12, 18})
 
 
 class RankingAdminReportTests(TestCase):

@@ -3,71 +3,21 @@ from datetime import date
 from django.db.models import (
     Count,
     Exists,
-    IntegerField,
+    F,
     OuterRef,
     Prefetch,
     Q,
     Subquery,
-    Sum,
-    Value,
     Window,
 )
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, RowNumber
 
 from projects.models import Project, RepositorySnapshot
-from users.models import User, UserActivity
 
-from .models import ProjectRanking
-
-
-def list_user_ranking_targets(
-    period_start: date,
-    period_end: date,
-) -> list[User]:
-    """집계 기간의 활동 합계와 종료일 누적 Star를 함께 조회한다."""
-    activity_in_period = Q(
-        activities__activity_date__gte=period_start,
-        activities__activity_date__lte=period_end,
-    )
-    latest_stars = (
-        UserActivity.objects.filter(
-            user_id=OuterRef("pk"),
-            activity_date__lte=period_end,
-            stars__isnull=False,
-        )
-        .order_by("-activity_date", "-pk")
-        .values("stars")[:1]
-    )
-    return list(
-        User.objects.filter(
-            is_superuser=False,
-            date_joined__date__lte=period_end,
-        )
-        .only(
-            "id",
-            "username",
-            "date_joined",
-        )
-        .annotate(
-            ranking_stars=Coalesce(
-                Subquery(latest_stars, output_field=IntegerField()),
-                Value(0),
-            ),
-            ranking_commits=Coalesce(
-                Sum("activities__commits", filter=activity_in_period),
-                Value(0),
-            ),
-            ranking_prs=Coalesce(
-                Sum("activities__prs", filter=activity_in_period),
-                Value(0),
-            ),
-            ranking_issues=Coalesce(
-                Sum("activities__issues", filter=activity_in_period),
-                Value(0),
-            ),
-        )
-        .order_by("username")
-    )
+from .models import (
+    ProjectRanking,
+    SixMonthProjectRanking,
+)
 
 
 def list_project_rankings(
@@ -81,16 +31,25 @@ def list_project_rankings(
         .only(
             "project_id",
             "project__name",
-            "rank",
             "total_score",
             "stars",
             "forks",
             "commits",
             "pull_requests",
         )
-        .annotate(total_count=Window(Count("project_id")))
+        .annotate(
+            rank=Window(
+                expression=RowNumber(),
+                order_by=(
+                    F("total_score").desc(),
+                    F("project__name").asc(),
+                    F("project_id").asc(),
+                ),
+            ),
+            total_count=Window(Count("project_id")),
+        )
         .order_by(
-            "rank",
+            "-total_score",
             "project__name",
             "project_id",
         )
@@ -101,6 +60,44 @@ def list_project_rankings(
     if start == 0:
         return results, 0
     return results, ProjectRanking.objects.count()
+
+
+def list_six_month_project_rankings(
+    *,
+    start: int,
+    limit: int,
+) -> tuple[list[SixMonthProjectRanking], int]:
+    """마지막 정상 6개월 프로젝트 랭킹의 요청 구간을 조회한다."""
+    rankings = (
+        SixMonthProjectRanking.objects.select_related("project")
+        .only(
+            "project_id",
+            "project__name",
+            "total_score",
+            "stars",
+            "forks",
+            "commits",
+            "pull_requests",
+        )
+        .annotate(
+            rank=Window(
+                expression=RowNumber(),
+                order_by=(
+                    F("total_score").desc(),
+                    F("project__name").asc(),
+                    F("project_id").asc(),
+                ),
+            ),
+            total_count=Window(Count("project_id")),
+        )
+        .order_by("-total_score", "project__name", "project_id")
+    )
+    results = list(rankings[start : start + limit])
+    if results:
+        return results, results[0].total_count
+    if start == 0:
+        return results, 0
+    return results, SixMonthProjectRanking.objects.count()
 
 
 def list_project_ranking_targets(
