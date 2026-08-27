@@ -38,8 +38,8 @@ from .serializers import (
     ProjectDetailSerializer,
     ProjectListSerializer,
     ProjectMemberDescriptionSerializer,
-    ProjectMemberListSerializer,
     ProjectMemberManagementSerializer,
+    ProjectMemberSerializer,
     ProjectMembershipHistorySerializer,
     ProjectMemberUpdateSerializer,
     ProjectUpdateSerializer,
@@ -456,7 +456,7 @@ class ProjectMembers(APIView):
         serializer_class = (
             ProjectMemberManagementSerializer
             if query.manage
-            else ProjectMemberListSerializer
+            else ProjectMemberSerializer
         )
         return Response(
             success(serializer_class(members, many=True).data),

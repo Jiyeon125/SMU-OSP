@@ -375,25 +375,19 @@ class ProjectListSerializer(ProjectSerializer):
 
 
 class ProjectMemberSerializer(serializers.ModelSerializer):
-    userId = serializers.IntegerField(source="user_id", allow_null=True)
     username = serializers.CharField(source="user.username", allow_null=True)
     name = serializers.SerializerMethodField()
     role = serializers.SerializerMethodField()
     joinedAt = serializers.DateTimeField(source="joined_at", allow_null=True)
-    createdAt = serializers.DateTimeField(source="created_at")
 
     class Meta:
         model = Member
         fields = (
             "id",
-            "userId",
             "username",
             "name",
             "role",
-            "status",
-            "description",
             "joinedAt",
-            "createdAt",
         )
 
     def get_name(self, obj):
@@ -403,19 +397,6 @@ class ProjectMemberSerializer(serializers.ModelSerializer):
 
     def get_role(self, obj):
         return "LEADER" if obj.is_leader else "MEMBER"
-
-
-class ProjectMemberListSerializer(ProjectMemberSerializer):
-    """일반 멤버 목록에 필요한 정보만 변환한다."""
-
-    class Meta(ProjectMemberSerializer.Meta):
-        fields = (
-            "id",
-            "username",
-            "name",
-            "role",
-            "joinedAt",
-        )
 
 
 class ProjectMemberManagementSerializer(ProjectMemberSerializer):

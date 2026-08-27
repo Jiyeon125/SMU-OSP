@@ -986,7 +986,10 @@ class ProjectApiTests(TestCase):
             [(member["name"], member["role"]) for member in data["members"]],
             [("권지연", "LEADER"), ("임꺽정", "MEMBER")],
         )
-        self.assertEqual(data["members"][1]["description"], "프론트엔드")
+        self.assertEqual(data["members"][1]["username"], "teammate")
+        self.assertIn("joinedAt", data["members"][1])
+        for field in ("userId", "status", "description", "createdAt"):
+            self.assertNotIn(field, data["members"][1])
 
     def test_inactive_project_leader_cannot_edit_project(self):
         self.project.status = Project.Status.INACTIVE

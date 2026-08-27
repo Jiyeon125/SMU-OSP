@@ -6,14 +6,10 @@ export type ProjectApplicationStatus = "PENDING" | "JOINED" | "DECLINED" | "LEFT
 
 export interface ProjectDetailMember {
     id: number;
-    userId?: number | null;
-    username?: string | null;
+    username: string | null;
     name: string;
     role: ProjectMemberRole;
-    status: ProjectApplicationStatus;
-    description?: string | null;
     joinedAt: string | null;
-    createdAt: string;
 }
 
 /** 참가 신청 관리 화면에서 사용하는 대기 멤버 정보입니다. */
