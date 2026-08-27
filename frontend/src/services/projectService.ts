@@ -17,14 +17,13 @@ import {
     Project,
     ProjectApplicationHistory,
     ProjectCreateDetail,
+    ProjectCreateResult,
     ProjectDetail,
-    ProjectDetailMember,
     ProjectInput,
     ProjectMemberUpdateInput,
+    ProjectPendingMember,
     ProjectUpdateInput,
 } from "../types/project";
-
-const MAX_REAPPLICATIONS = 5;
 
 export function canReactivateProjectRepository(project: ProjectDetail): boolean {
     return project.status === "INACTIVE" && project.membershipRole === "OWNER";
@@ -32,28 +31,16 @@ export function canReactivateProjectRepository(project: ProjectDetail): boolean 
 
 export function getProjectApplicationAvailability({
     project,
-    applicationHistory,
     isLoggedIn,
     userLoading,
-    hasLoadedApplicationHistory,
 }: {
     project: ProjectDetail;
-    applicationHistory: ProjectApplicationHistory[];
     isLoggedIn: boolean;
     userLoading: boolean;
-    hasLoadedApplicationHistory: boolean;
 }): { canApply: boolean; unavailableReason: string | null } {
-    const latestApplication = applicationHistory[0];
     const hasActiveApplication =
-        latestApplication?.status === "PENDING" || latestApplication?.status === "JOINED";
-    const canApply =
-        isLoggedIn &&
-        hasLoadedApplicationHistory &&
-        project.status === "ACTIVE" &&
-        project.membershipRole == null &&
-        !hasActiveApplication &&
-        applicationHistory.length <= MAX_REAPPLICATIONS &&
-        project.memberCount < project.maxMembers;
+        project.applicationStatus === "PENDING" || project.applicationStatus === "JOINED";
+    const canApply = isLoggedIn && !userLoading && project.canApply;
 
     if (userLoading) return { canApply, unavailableReason: null };
     if (!isLoggedIn) {
@@ -62,7 +49,7 @@ export function getProjectApplicationAvailability({
             unavailableReason: "로그인 후 참가 신청할 수 있습니다.",
         };
     }
-    if (!hasLoadedApplicationHistory || project.membershipRole != null || hasActiveApplication) {
+    if (project.membershipRole != null || hasActiveApplication) {
         return { canApply, unavailableReason: null };
     }
     if (project.status !== "ACTIVE") {
@@ -71,19 +58,16 @@ export function getProjectApplicationAvailability({
             unavailableReason: "현재 참가 신청을 받지 않는 프로젝트입니다.",
         };
     }
-    if (applicationHistory.length > MAX_REAPPLICATIONS) {
-        return {
-            canApply,
-            unavailableReason: "현재 참가 신청할 수 없습니다.",
-        };
-    }
     if (project.memberCount >= project.maxMembers) {
         return {
             canApply,
             unavailableReason: "현재 참여 인원이 가득 차 참가 신청할 수 없습니다.",
         };
     }
-    return { canApply, unavailableReason: null };
+    return {
+        canApply,
+        unavailableReason: canApply ? null : "현재 참가 신청할 수 없습니다.",
+    };
 }
 
 export interface ListParams {
@@ -149,25 +133,43 @@ export async function listProjectLanguages(): Promise<ApiResponse<string[]>> {
     }
 }
 
-export async function listProjectApplications(): Promise<ApiResponse<ProjectApplicationHistory[]>> {
+/**
+ * 프로젝트 신청 이력을 페이지 단위로 조회합니다.
+ * @param params 조회 조건
+ * @param params.start 조회 시작 위치
+ * @param params.limit 최대 조회 개수
+ * @param params.status 멤버 상태 필터
+ * @param params.sort 신청일 정렬 기준
+ * @returns 프로젝트 신청 이력 API 응답
+ */
+export async function listProjectApplications(params: {
+    start: number;
+    limit: number;
+    status?: string;
+    sort: "latest" | "oldest";
+}): Promise<ApiResponse<ProjectApplicationHistory[], PaginationDetail>> {
     try {
-        return await getProjectMemberships();
+        return await getProjectMemberships(params);
     } catch (e) {
         return toApiResponse<ProjectApplicationHistory[]>(
             e,
             "프로젝트 신청 내역 조회 중 오류가 발생했습니다.",
-        );
+        ) as ApiResponse<ProjectApplicationHistory[], PaginationDetail>;
     }
 }
 
-export async function listProjectMembers(
+/**
+ * 프로젝트 관리 화면에 표시할 승인 대기 신청자만 조회합니다.
+ * @param projectId 조회할 프로젝트 ID
+ * @returns 승인 대기 신청자 API 응답
+ */
+export async function listPendingProjectMembers(
     projectId: number,
-    manage = false,
-): Promise<ApiResponse<ProjectDetailMember[]>> {
+): Promise<ApiResponse<ProjectPendingMember[]>> {
     try {
-        return await getProjectMembers(projectId, manage);
+        return await getProjectMembers(projectId, true, "PENDING");
     } catch (e) {
-        return toApiResponse<ProjectDetailMember[]>(
+        return toApiResponse<ProjectPendingMember[]>(
             e,
             "프로젝트 멤버 조회 중 오류가 발생했습니다.",
         );
@@ -230,14 +232,14 @@ export async function applyToProject(projectId: number): Promise<ApiResponse<nul
 
 export async function createProject(
     input: ProjectInput,
-): Promise<ApiResponse<Project, ProjectCreateDetail>> {
+): Promise<ApiResponse<ProjectCreateResult, ProjectCreateDetail>> {
     try {
         return await createProjectApi(input);
     } catch (e) {
-        return toApiResponse<Project>(e, "프로젝트 등록 중 오류가 발생했습니다.") as ApiResponse<
-            Project,
-            ProjectCreateDetail
-        >;
+        return toApiResponse<ProjectCreateResult>(
+            e,
+            "프로젝트 등록 중 오류가 발생했습니다.",
+        ) as ApiResponse<ProjectCreateResult, ProjectCreateDetail>;
     }
 }
 

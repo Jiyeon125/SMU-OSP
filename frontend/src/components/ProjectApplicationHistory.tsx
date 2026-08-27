@@ -1,6 +1,6 @@
 import { Box, Flex, NativeSelect, SimpleGrid, Spinner, Text, VStack } from "@chakra-ui/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { cancelProjectApplication, listProjectApplications } from "../services/projectService";
 import { PROJECT_STATUS_LABEL, ProjectApplicationStatus } from "../types/project";
@@ -8,6 +8,12 @@ import { ERROR_CODES } from "../types/response";
 import { formatDateKST } from "../utils/date";
 import StatusMessagePanel from "./StatusMessagePanel";
 import { Button } from "./ui/button";
+import {
+    PaginationItems,
+    PaginationNextTrigger,
+    PaginationPrevTrigger,
+    PaginationRoot,
+} from "./ui/pagination";
 
 type StatusFilter = "ALL" | "WAITING" | "JOINED" | "DECLINED" | "CLOSED";
 type SortOrder = "LATEST" | "OLDEST";
@@ -21,21 +27,31 @@ const STATUS_META: Record<ProjectApplicationStatus, { label: string; bg: string;
         CANCELED: { label: "신청 취소", bg: "#eceff1", color: "#455a64" },
     };
 
-function matchesStatus(status: ProjectApplicationStatus, filter: StatusFilter) {
-    if (filter === "ALL") return true;
-    if (filter === "WAITING") return status === "PENDING";
-    if (filter === "CLOSED") return status === "LEFT" || status === "CANCELED";
-    return status === filter;
-}
+const PAGE_SIZE = 12;
+const STATUS_FILTER_QUERY: Record<StatusFilter, string | undefined> = {
+    ALL: undefined,
+    WAITING: "PENDING",
+    JOINED: "JOINED",
+    DECLINED: "DECLINED",
+    CLOSED: "LEFT,CANCELED",
+};
 
+/** 프로젝트 신청 이력 필터와 페이지 목록을 표시합니다. */
 export default function ProjectApplicationHistory() {
     const queryClient = useQueryClient();
     const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
     const [sortOrder, setSortOrder] = useState<SortOrder>("LATEST");
+    const [page, setPage] = useState(1);
     const [cancelError, setCancelError] = useState<string | null>(null);
     const { data, isLoading, isFetching, refetch } = useQuery({
-        queryKey: ["project-application-history"],
-        queryFn: listProjectApplications,
+        queryKey: ["project-application-history", page, statusFilter, sortOrder],
+        queryFn: () =>
+            listProjectApplications({
+                start: (page - 1) * PAGE_SIZE,
+                limit: PAGE_SIZE,
+                status: STATUS_FILTER_QUERY[statusFilter],
+                sort: sortOrder === "OLDEST" ? "oldest" : "latest",
+            }),
         retry: false,
     });
     const cancelMutation = useMutation({
@@ -47,22 +63,15 @@ export default function ProjectApplicationHistory() {
                 return;
             }
 
+            setPage(1);
             await queryClient.invalidateQueries({
                 queryKey: ["project-application-history"],
             });
         },
     });
 
-    const applications = useMemo(() => {
-        if (data?.status !== "SUCCESS") return [];
-        return [...data.data]
-            .filter((application) => matchesStatus(application.status, statusFilter))
-            .sort((a, b) => {
-                const timeDifference =
-                    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-                return sortOrder === "LATEST" ? timeDifference : -timeDifference;
-            });
-    }, [data, sortOrder, statusFilter]);
+    const applications = data?.status === "SUCCESS" ? data.data : [];
+    const pagination = data?.status === "SUCCESS" ? data.detail.pagination : null;
 
     const isPermissionDenied = data?.status === ERROR_CODES.PERMISSION_DENIED;
 
@@ -91,9 +100,10 @@ export default function ProjectApplicationHistory() {
                         <NativeSelect.Field
                             aria-label="신청 상태 필터"
                             value={statusFilter}
-                            onChange={(event) =>
-                                setStatusFilter(event.target.value as StatusFilter)
-                            }
+                            onChange={(event) => {
+                                setStatusFilter(event.target.value as StatusFilter);
+                                setPage(1);
+                            }}
                         >
                             <option value="ALL">전체 상태</option>
                             <option value="WAITING">승인 대기</option>
@@ -107,7 +117,10 @@ export default function ProjectApplicationHistory() {
                         <NativeSelect.Field
                             aria-label="신청 내역 정렬"
                             value={sortOrder}
-                            onChange={(event) => setSortOrder(event.target.value as SortOrder)}
+                            onChange={(event) => {
+                                setSortOrder(event.target.value as SortOrder);
+                                setPage(1);
+                            }}
                         >
                             <option value="LATEST">최신 신청순</option>
                             <option value="OLDEST">오래된 신청순</option>
@@ -158,7 +171,7 @@ export default function ProjectApplicationHistory() {
                         </Button>
                     ) : null}
                 </StatusMessagePanel>
-            ) : data.data.length === 0 ? (
+            ) : applications.length === 0 && statusFilter === "ALL" ? (
                 <StatusMessagePanel
                     title="신청 내역이 없습니다."
                     description="아직 프로젝트 신청 내역이 없습니다."
@@ -263,6 +276,22 @@ export default function ProjectApplicationHistory() {
                         );
                     })}
                 </SimpleGrid>
+            )}
+            {applications.length > 0 && pagination && pagination.count > PAGE_SIZE && (
+                <Flex justifyContent="center">
+                    <PaginationRoot
+                        page={page}
+                        count={pagination.count}
+                        pageSize={PAGE_SIZE}
+                        onPageChange={(event) => setPage(event.page)}
+                    >
+                        <Flex gap={1}>
+                            <PaginationPrevTrigger />
+                            <PaginationItems />
+                            <PaginationNextTrigger />
+                        </Flex>
+                    </PaginationRoot>
+                </Flex>
             )}
         </VStack>
     );

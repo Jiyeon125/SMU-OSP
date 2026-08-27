@@ -6,13 +6,18 @@ export type ProjectApplicationStatus = "PENDING" | "JOINED" | "DECLINED" | "LEFT
 
 export interface ProjectDetailMember {
     id: number;
-    userId?: number | null;
-    username?: string | null;
+    username: string | null;
     name: string;
     role: ProjectMemberRole;
+    joinedAt: string | null;
+}
+
+/** 참가 신청 관리 화면에서 사용하는 대기 멤버 정보입니다. */
+export interface ProjectPendingMember {
+    id: number;
+    name: string;
     status: ProjectApplicationStatus;
     description?: string | null;
-    joinedAt: string | null;
     createdAt: string;
 }
 
@@ -21,39 +26,43 @@ export interface ProjectMemberUpdateInput {
     description?: string | null;
 }
 
-export interface Repository {
-    id: number;
-    githubId: number;
-    name: string;
+/** 프로젝트 목록에서 사용하는 Repository 요약 정보입니다. */
+export interface ProjectListRepository {
     fullName: string;
-    description?: string | null;
     stars: number;
     forks: number;
-    language?: string | null;
-    languages?: string[];
+    languages: string[];
     htmlUrl: string;
     fetchedAt: string | null;
+}
+
+export interface Repository extends ProjectListRepository {
+    description?: string | null;
 }
 
 export interface Project {
     id: number;
     name: string;
     description: string;
-    demoUrl?: string | null;
-    presentationUrl?: string | null;
     techStack: string[];
     status: ProjectStatus;
-    maxMembers: number;
-    repository?: Repository | null;
+    repository?: ProjectListRepository | null;
     membershipRole?: "OWNER" | "MEMBER" | null;
     createdAt: string;
     updatedAt: string;
 }
 
 export interface ProjectDetail extends Project {
+    demoUrl?: string | null;
+    presentationUrl?: string | null;
+    maxMembers: number;
+    repository?: Repository | null;
     memberCount: number;
     canViewMembers: boolean;
     canEdit: boolean;
+    canApply: boolean;
+    applicationStatus: ProjectApplicationStatus | null;
+    pendingMemberCount: number;
     members: ProjectDetailMember[] | null;
 }
 
@@ -62,10 +71,8 @@ export interface ProjectApplicationHistory {
     projectName: string;
     projectStatus: ProjectStatus;
     id: number;
-    userId: number | null;
     status: ProjectApplicationStatus;
     description?: string | null;
-    joinedAt: string | null;
     createdAt: string;
     updatedAt: string;
 }
@@ -85,6 +92,11 @@ export interface ProjectCreateDetail {
         code: string;
         message: string;
     };
+}
+
+/** 프로젝트 생성 후 후속 이동에 필요한 응답입니다. */
+export interface ProjectCreateResult {
+    id: number;
 }
 
 export interface ProjectUpdateInput extends ProjectInput {

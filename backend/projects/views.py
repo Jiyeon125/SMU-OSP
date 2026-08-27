@@ -11,7 +11,11 @@ from common.authentication import api_login_required
 from common.pagination import pagination_detail
 from common.responses import fail, success
 
-from .forms import ProjectListQueryForm, ProjectMemberQueryForm
+from .forms import (
+    MembershipHistoryQueryForm,
+    ProjectListQueryForm,
+    ProjectMemberQueryForm,
+)
 from .models import (
     Member,
     Project,
@@ -32,11 +36,12 @@ from .selectors import (
 from .serializers import (
     ProjectCreateSerializer,
     ProjectDetailSerializer,
+    ProjectListSerializer,
     ProjectMemberDescriptionSerializer,
+    ProjectMemberManagementSerializer,
     ProjectMemberSerializer,
     ProjectMembershipHistorySerializer,
     ProjectMemberUpdateSerializer,
-    ProjectSerializer,
     ProjectUpdateSerializer,
 )
 from .services import (
@@ -108,7 +113,7 @@ class Projects(APIView):
             user_id=request.user.pk if request.user.is_authenticated else None,
         )
         _prepare_projects_for_serialization(projects)
-        serializer = ProjectSerializer(
+        serializer = ProjectListSerializer(
             projects,
             many=True,
         )
@@ -164,7 +169,6 @@ class Projects(APIView):
             )
 
         project = result.project
-        project.request_user_memberships = [result.leader_member]
         detail = None
         if result.repository_error is not None:
             error = result.repository_error
@@ -176,9 +180,8 @@ class Projects(APIView):
                 }
             }
 
-        _prepare_projects_for_serialization([project])
         return Response(
-            success(ProjectSerializer(project).data, detail),
+            success({"id": project.pk}, detail),
             status=status.HTTP_201_CREATED,
         )
 
@@ -186,7 +189,12 @@ class Projects(APIView):
 class ProjectDetail(APIView):
     def get(self, request, pk):
         try:
-            project = get_project_detail(pk)
+            project = get_project_detail(
+                pk,
+                user_id=(
+                    request.user.pk if request.user.is_authenticated else None
+                ),
+            )
         except Project.DoesNotExist:
             return Response(
                 fail(
@@ -215,6 +223,15 @@ class ProjectDetail(APIView):
             if current_member is not None
             else False
         )
+        application_history = getattr(
+            project,
+            "request_user_application_history",
+            [],
+        )
+        can_apply = bool(
+            request.user.is_authenticated
+            and project.can_apply_for_membership(application_history)
+        )
 
         _prepare_projects_for_serialization([project])
         serializer = ProjectDetailSerializer(
@@ -222,6 +239,7 @@ class ProjectDetail(APIView):
             context={
                 "can_view_members": can_view_members,
                 "can_edit": can_edit,
+                "can_apply": can_apply,
             },
         )
         return Response(success(serializer.data), status=status.HTTP_200_OK)
@@ -375,9 +393,33 @@ class ProjectLanguages(APIView):
 class ProjectMemberships(APIView):
     @api_login_required
     def get(self, request):
-        memberships = list_memberships_for_user(request.user.pk)
+        query_form = MembershipHistoryQueryForm(request.query_params)
+        if not query_form.is_valid():
+            query_error = query_form.api_error()
+            return Response(
+                fail(
+                    query_error.code,
+                    query_error.message,
+                    status.HTTP_400_BAD_REQUEST,
+                ),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        query = query_form.to_query()
+        memberships, count = list_memberships_for_user(
+            user_id=request.user.pk,
+            start=query.start,
+            limit=query.limit,
+            statuses=query.statuses,
+            sort=query.sort,
+        )
         serializer = ProjectMembershipHistorySerializer(memberships, many=True)
-        return Response(success(serializer.data), status=status.HTTP_200_OK)
+        return Response(
+            success(
+                serializer.data,
+                pagination_detail(query.start, query.limit, count),
+            ),
+            status=status.HTTP_200_OK,
+        )
 
 
 class ProjectMembers(APIView):
@@ -394,24 +436,30 @@ class ProjectMembers(APIView):
                 ),
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        manage = query_form.to_query().manage
+        query = query_form.to_query()
 
         try:
             require_project_access(
                 project_id=pk,
                 user_id=request.user.pk,
-                manage=manage,
+                manage=query.manage,
             )
         except ProjectPermissionDenied as error:
             return _project_permission_denied_response(error)
 
         members = list_project_members(
             project_id=pk,
-            joined_only=not manage,
+            manage=query.manage,
+            status=query.status,
         )
 
+        serializer_class = (
+            ProjectMemberManagementSerializer
+            if query.manage
+            else ProjectMemberSerializer
+        )
         return Response(
-            success(ProjectMemberSerializer(members, many=True).data),
+            success(serializer_class(members, many=True).data),
             status=status.HTTP_200_OK,
         )
 

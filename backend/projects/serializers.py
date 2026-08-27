@@ -14,13 +14,11 @@ MAX_LIST_ITEM_LENGTH = 100
 
 
 class RepositorySerializer(serializers.ModelSerializer):
-    githubId = serializers.IntegerField(source="github_id")
     fullName = serializers.CharField(source="full_name")
     htmlUrl = serializers.URLField(source="html_url")
     description = serializers.SerializerMethodField()
     stars = serializers.SerializerMethodField()
     forks = serializers.SerializerMethodField()
-    language = serializers.SerializerMethodField()
     languages = serializers.SerializerMethodField()
     fetchedAt = serializers.SerializerMethodField()
 
@@ -30,10 +28,6 @@ class RepositorySerializer(serializers.ModelSerializer):
     def _latest_snapshot(self, repository):
         snapshots = getattr(repository, "serialized_snapshots", [])
         return snapshots[0] if snapshots else None
-
-    def _primary_language(self, repository):
-        languages = getattr(repository, "serialized_languages", [])
-        return languages[0] if languages else None
 
     def get_description(self, repository):
         status = self._status(repository)
@@ -46,10 +40,6 @@ class RepositorySerializer(serializers.ModelSerializer):
     def get_forks(self, repository):
         snapshot = self._latest_snapshot(repository)
         return snapshot.forks if snapshot else 0
-
-    def get_language(self, repository):
-        language = self._primary_language(repository)
-        return language.language if language else None
 
     def get_languages(self, repository):
         return [
@@ -64,14 +54,24 @@ class RepositorySerializer(serializers.ModelSerializer):
     class Meta:
         model = Repository
         fields = (
-            "id",
-            "githubId",
-            "name",
             "fullName",
             "description",
             "stars",
             "forks",
-            "language",
+            "languages",
+            "htmlUrl",
+            "fetchedAt",
+        )
+
+
+class ProjectListRepositorySerializer(RepositorySerializer):
+    """프로젝트 목록에 필요한 Repository 정보만 변환한다."""
+
+    class Meta(RepositorySerializer.Meta):
+        fields = (
+            "fullName",
+            "stars",
+            "forks",
             "languages",
             "htmlUrl",
             "fetchedAt",
@@ -342,26 +342,42 @@ class ProjectSerializer(serializers.ModelSerializer):
         )
 
 
+class ProjectListSerializer(ProjectSerializer):
+    """프로젝트 목록 화면에 필요한 정보만 변환한다."""
+
+    repository = ProjectListRepositorySerializer(
+        read_only=True,
+        allow_null=True,
+    )
+
+    class Meta(ProjectSerializer.Meta):
+        fields = (
+            "id",
+            "name",
+            "description",
+            "techStack",
+            "status",
+            "repository",
+            "membershipRole",
+            "createdAt",
+            "updatedAt",
+        )
+
+
 class ProjectMemberSerializer(serializers.ModelSerializer):
-    userId = serializers.IntegerField(source="user_id", allow_null=True)
     username = serializers.CharField(source="user.username", allow_null=True)
     name = serializers.SerializerMethodField()
     role = serializers.SerializerMethodField()
     joinedAt = serializers.DateTimeField(source="joined_at", allow_null=True)
-    createdAt = serializers.DateTimeField(source="created_at")
 
     class Meta:
         model = Member
         fields = (
             "id",
-            "userId",
             "username",
             "name",
             "role",
-            "status",
-            "description",
             "joinedAt",
-            "createdAt",
         )
 
     def get_name(self, obj):
@@ -371,6 +387,19 @@ class ProjectMemberSerializer(serializers.ModelSerializer):
 
     def get_role(self, obj):
         return "LEADER" if obj.is_leader else "MEMBER"
+
+
+class ProjectMemberManagementSerializer(ProjectMemberSerializer):
+    createdAt = serializers.DateTimeField(source="created_at")
+
+    class Meta(ProjectMemberSerializer.Meta):
+        fields = (
+            "id",
+            "name",
+            "status",
+            "description",
+            "createdAt",
+        )
 
 
 class ProjectMemberUpdateSerializer(serializers.Serializer):
@@ -402,8 +431,6 @@ class ProjectMembershipHistorySerializer(serializers.ModelSerializer):
     projectId = serializers.IntegerField(source="project_id")
     projectName = serializers.CharField(source="project.name")
     projectStatus = serializers.CharField(source="project.status")
-    userId = serializers.IntegerField(source="user_id", allow_null=True)
-    joinedAt = serializers.DateTimeField(source="joined_at", allow_null=True)
     createdAt = serializers.DateTimeField(source="created_at")
     updatedAt = serializers.DateTimeField(source="updated_at")
 
@@ -414,10 +441,8 @@ class ProjectMembershipHistorySerializer(serializers.ModelSerializer):
             "projectName",
             "projectStatus",
             "id",
-            "userId",
             "status",
             "description",
-            "joinedAt",
             "createdAt",
             "updatedAt",
         )
@@ -427,13 +452,20 @@ class ProjectDetailSerializer(ProjectSerializer):
     memberCount = serializers.SerializerMethodField()
     canViewMembers = serializers.SerializerMethodField()
     canEdit = serializers.SerializerMethodField()
+    canApply = serializers.SerializerMethodField()
+    applicationStatus = serializers.SerializerMethodField()
+    pendingMemberCount = serializers.SerializerMethodField()
     members = serializers.SerializerMethodField()
 
     class Meta(ProjectSerializer.Meta):
-        fields = ProjectSerializer.Meta.fields + (
+        fields = (
+            *ProjectSerializer.Meta.fields,
             "memberCount",
             "canViewMembers",
             "canEdit",
+            "canApply",
+            "applicationStatus",
+            "pendingMemberCount",
             "members",
         )
 
@@ -446,17 +478,22 @@ class ProjectDetailSerializer(ProjectSerializer):
     def get_canEdit(self, obj):
         return bool(self.context.get("can_edit", False))
 
+    def get_canApply(self, obj):
+        return bool(self.context.get("can_apply", False))
+
+    def get_applicationStatus(self, obj):
+        memberships = getattr(obj, "request_user_application_history", [])
+        return memberships[0].status if memberships else None
+
+    def get_pendingMemberCount(self, obj):
+        if not self.get_canEdit(obj):
+            return 0
+        return obj.pending_member_count
+
     def get_members(self, obj):
         if not self.get_canViewMembers(obj):
             return None
         return ProjectMemberSerializer(self._joined_members(obj), many=True).data
 
     def _joined_members(self, obj):
-        joined_members = getattr(obj, "joined_members", None)
-        if joined_members is not None:
-            return joined_members
-        return list(
-            obj.members.filter(status=Member.Status.JOINED)
-            .select_related("user")
-            .order_by("-is_leader", "created_at", "pk")
-        )
+        return getattr(obj, "joined_members", [])

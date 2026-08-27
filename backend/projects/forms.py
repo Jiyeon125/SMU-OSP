@@ -3,8 +3,7 @@ from typing import Any
 
 from django import forms
 
-from .models import Project
-
+from .models import Member, Project
 
 TRUE_QUERY_VALUES = {"1", "true"}
 FALSE_QUERY_VALUES = {"0", "false"}
@@ -54,6 +53,15 @@ class ProjectListQuery:
 @dataclass(frozen=True)
 class ProjectMemberQuery:
     manage: bool
+    status: str | None
+
+
+@dataclass(frozen=True)
+class MembershipHistoryQuery:
+    start: int
+    limit: int
+    statuses: tuple[str, ...]
+    sort: str
 
 
 @dataclass(frozen=True)
@@ -181,6 +189,13 @@ class ProjectMemberQueryForm(ApiQueryForm):
             "INVALID_MEMBER_FILTER",
             "manage는 true 또는 false여야 합니다.",
         ),
+        "status": QueryApiError(
+            "INVALID_MEMBER_FILTER",
+            (
+                "status는 유효한 멤버 상태이며 manage=true일 때만 "
+                "사용할 수 있습니다."
+            ),
+        ),
     }
     default_api_error = QueryApiError(
         "INVALID_MEMBER_FILTER",
@@ -188,8 +203,92 @@ class ProjectMemberQueryForm(ApiQueryForm):
     )
 
     manage = QueryBooleanField(required=False)
+    status = forms.ChoiceField(
+        choices=Member.Status.choices,
+        required=False,
+    )
+
+    def clean(self) -> dict[str, Any]:
+        cleaned_data = super().clean()
+        if cleaned_data.get("status") and not cleaned_data.get("manage"):
+            self.add_error(
+                "status",
+                forms.ValidationError("invalid", code="manage_required"),
+            )
+        return cleaned_data
 
     def to_query(self) -> ProjectMemberQuery:
         if not self.is_valid():
             raise ValueError("유효한 입력만 ProjectMemberQuery로 변환할 수 있습니다.")
-        return ProjectMemberQuery(manage=self.cleaned_data["manage"])
+        return ProjectMemberQuery(
+            manage=self.cleaned_data["manage"],
+            status=self.cleaned_data["status"] or None,
+        )
+
+
+class MembershipHistoryQueryForm(ApiQueryForm):
+    api_errors = {
+        "start": QueryApiError(
+            "INVALID_PAGINATION_PARAMETER",
+            "start는 0 이상, limit은 1 이상 100 이하여야 합니다.",
+        ),
+        "limit": QueryApiError(
+            "INVALID_PAGINATION_PARAMETER",
+            "start는 0 이상, limit은 1 이상 100 이하여야 합니다.",
+        ),
+        "status": QueryApiError(
+            "INVALID_MEMBER_FILTER",
+            "지원하지 않는 멤버 상태입니다.",
+        ),
+        "sort": QueryApiError(
+            "INVALID_MEMBER_FILTER",
+            "지원하지 않는 정렬 방식입니다.",
+        ),
+    }
+    default_api_error = QueryApiError(
+        "INVALID_MEMBER_FILTER",
+        "신청 내역 조회 조건을 확인해주세요.",
+    )
+
+    start = QueryIntegerField(default=0, required=False, min_value=0)
+    limit = QueryIntegerField(
+        default=12,
+        required=False,
+        min_value=1,
+        max_value=100,
+    )
+    status = forms.CharField(required=False, strip=True)
+    sort = forms.ChoiceField(
+        choices=(
+            ("latest", "latest"),
+            ("oldest", "oldest"),
+        ),
+        required=False,
+    )
+
+    def clean_status(self) -> tuple[str, ...]:
+        value = self.cleaned_data["status"]
+        if not value:
+            return ()
+        statuses = tuple(
+            status.strip().upper()
+            for status in value.split(",")
+            if status.strip()
+        )
+        if not statuses or any(
+            status not in Member.Status.values for status in statuses
+        ):
+            raise forms.ValidationError("invalid", code="invalid_status")
+        return statuses
+
+    def to_query(self) -> MembershipHistoryQuery:
+        if not self.is_valid():
+            raise ValueError(
+                "유효한 입력만 MembershipHistoryQuery로 변환할 수 있습니다."
+            )
+        return MembershipHistoryQuery(
+            start=self.cleaned_data["start"],
+            limit=self.cleaned_data["limit"],
+            statuses=self.cleaned_data["status"],
+            sort=self.cleaned_data["sort"] or "latest",
+        )

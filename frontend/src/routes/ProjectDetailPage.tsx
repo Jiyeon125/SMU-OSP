@@ -42,8 +42,6 @@ import {
   getProject,
   getProjectApplicationAvailability,
   leaveProject,
-  listProjectApplications,
-  listProjectMembers,
   reactivateProject,
   removeProjectMember,
 } from "../services/projectService";
@@ -423,21 +421,10 @@ export default function ProjectDetailPage() {
     queryFn: () => getProject(id),
     enabled: !!id,
   });
-  const applicationHistoryQuery = useQuery({
-    queryKey: ["project-application-history"],
-    queryFn: listProjectApplications,
-    enabled: !userLoading && isLoggedIn,
-    retry: false,
-  });
   const managedProject =
     projectQuery.data?.status === "SUCCESS" ? projectQuery.data.data : null;
   const isRepositoryCollectionPending =
     managedProject?.repository?.fetchedAt === null;
-  const managedMembersQuery = useQuery({
-    queryKey: ["project-members", managedProject?.id, "manage"],
-    queryFn: () => listProjectMembers(managedProject!.id, true),
-    enabled: !!managedProject?.canEdit,
-  });
 
   const leaveMutation = useMutation({
     mutationFn: ({
@@ -616,35 +603,16 @@ export default function ProjectDetailPage() {
   }
 
   const project = resp.data;
-  const repositoryLanguages =
-    project.repository?.languages ??
-    (project.repository?.language ? [project.repository.language] : []);
-  const applicationHistory =
-    applicationHistoryQuery.data?.status === "SUCCESS"
-      ? applicationHistoryQuery.data.data.filter(
-          (application) => application.projectId === project.id
-        )
-      : [];
-  const hasLoadedApplicationHistory =
-    applicationHistoryQuery.data?.status === "SUCCESS";
-  const latestApplication = applicationHistory[0];
+  const repositoryLanguages = project.repository?.languages ?? [];
   const {
     canApply,
     unavailableReason: applicationUnavailableReason,
   } = getProjectApplicationAvailability({
     project,
-    applicationHistory,
     isLoggedIn,
     userLoading,
-    hasLoadedApplicationHistory,
   });
-  const managedMembersResponse = managedMembersQuery.data;
-  const pendingCount =
-    managedMembersResponse?.status === "SUCCESS"
-      ? managedMembersResponse.data.filter(
-           (member) => member.status === "PENDING"
-         ).length
-      : 0;
+  const pendingCount = project.pendingMemberCount;
   const repositoryName = project.repository?.fullName;
   const repositoryUrl = project.repository?.htmlUrl;
   const canReactivateProject = canReactivateProjectRepository(project);
@@ -852,7 +820,7 @@ export default function ProjectDetailPage() {
           }
         />
 
-        {(applicationMessage || latestApplication?.status === "PENDING") && (
+        {(applicationMessage || project.applicationStatus === "PENDING") && (
           <StatusMessagePanel
             role={
               applicationMessage && applicationMessageFailed
@@ -864,7 +832,7 @@ export default function ProjectDetailPage() {
             }
             actions={
               <HStack flexShrink={0}>
-                {latestApplication?.status === "PENDING" && (
+                {project.applicationStatus === "PENDING" && (
                   <Button
                     size="sm"
                     colorPalette="red"
@@ -1040,7 +1008,7 @@ export default function ProjectDetailPage() {
                   <SimpleGrid columns={{ base: 2, md: 4 }} gap={2} mb={3}>
                     <Stat
                       label="주요 언어"
-                      value={project.repository.language || "-"}
+                      value={project.repository.languages[0] || "-"}
                     />
                     <Stat label="stars" value={`${project.repository.stars}`} />
                     <Stat label="forks" value={`${project.repository.forks}`} />

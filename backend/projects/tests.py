@@ -18,7 +18,7 @@ from .models import (
     RepositorySnapshot,
     RepositoryStatus,
 )
-from .serializers import RepositorySerializer
+from .serializers import ProjectDetailSerializer, RepositorySerializer
 from .tasks import (
     GITHUB_API_FAILED,
     PENDING,
@@ -143,7 +143,8 @@ class RepositoryDataModelTests(TestCase):
 
         self.assertEqual(data["stars"], 0)
         self.assertEqual(data["forks"], 0)
-        self.assertIsNone(data["language"])
+        self.assertEqual(data["languages"], [])
+        self.assertNotIn("language", data)
 
 
 class RepositoryRefreshTaskTests(TestCase):
@@ -654,10 +655,18 @@ class ProjectApiTests(TestCase):
         self.assertNotIn("leaderId", body["data"][0])
         self.assertNotIn("repositoryId", body["data"][0])
         self.assertNotIn("repositoryUrl", body["data"][0])
+        self.assertNotIn("demoUrl", body["data"][0])
+        self.assertNotIn("presentationUrl", body["data"][0])
+        self.assertNotIn("maxMembers", body["data"][0])
         self.assertEqual(body["data"][0]["status"], "ACTIVE")
-        self.assertEqual(body["data"][0]["maxMembers"], 5)
         self.assertIsNone(body["data"][0]["membershipRole"])
-        self.assertEqual(body["data"][0]["repository"]["fullName"], "Jiyeon125/SMU-OSP")
+        repository = body["data"][0]["repository"]
+        self.assertEqual(repository["fullName"], "Jiyeon125/SMU-OSP")
+        self.assertNotIn("id", repository)
+        self.assertNotIn("githubId", repository)
+        self.assertNotIn("name", repository)
+        self.assertNotIn("description", repository)
+        self.assertNotIn("language", repository)
         self.assertEqual(body["detail"]["pagination"]["count"], 1)
         self.assertEqual(body["detail"]["pagination"]["currentPage"], 1)
 
@@ -690,8 +699,10 @@ class ProjectApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 201)
+        project = Project.objects.get(name="Language Project")
+        self.assertEqual(response.json()["data"], {"id": project.pk})
         self.assertEqual(
-            response.json()["data"]["techStack"],
+            list(project.languages.values_list("name", flat=True)),
             ["Python", "TypeScript"],
         )
         self.assertEqual(invalid_response.status_code, 400)
@@ -811,9 +822,92 @@ class ProjectApiTests(TestCase):
         self.assertEqual(body["data"]["memberCount"], 1)
         self.assertFalse(body["data"]["canViewMembers"])
         self.assertFalse(body["data"]["canEdit"])
-        self.assertNotIn("canApply", body["data"])
-        self.assertNotIn("applicationStatus", body["data"])
+        self.assertFalse(body["data"]["canApply"])
+        self.assertIsNone(body["data"]["applicationStatus"])
+        self.assertEqual(body["data"]["pendingMemberCount"], 0)
         self.assertIsNone(body["data"]["members"])
+
+    def test_project_detail_serializer_does_not_query_member_fallback(self):
+        serializer = ProjectDetailSerializer(
+            self.project,
+            context={"can_view_members": True},
+        )
+
+        with self.assertNumQueries(0):
+            members = serializer.get_members(self.project)
+
+        self.assertEqual(members, [])
+
+    def test_project_detail_returns_pending_count_only_to_leader(self):
+        applicant = get_user_model().objects.create_user(
+            username="pending-count-applicant",
+            github_email="pending-count-applicant@example.com",
+            name="대기 신청자",
+            student_id=302,
+            major="IT공학",
+        )
+        Member.objects.create(
+            project=self.project,
+            user=applicant,
+            status=Member.Status.PENDING,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(f"/api/v1/projects/{self.project.pk}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["pendingMemberCount"], 1)
+
+        self.client.force_login(applicant)
+        response = self.client.get(f"/api/v1/projects/{self.project.pk}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["pendingMemberCount"], 0)
+
+    def test_project_detail_allows_eligible_user_to_apply(self):
+        applicant = get_user_model().objects.create_user(
+            username="eligible-applicant",
+            github_email="eligible-applicant@example.com",
+            name="신규 신청자",
+            student_id=303,
+            major="IT공학",
+        )
+        self.client.force_login(applicant)
+
+        response = self.client.get(f"/api/v1/projects/{self.project.pk}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["data"]["canApply"])
+
+    def test_project_detail_returns_current_application_state(self):
+        applicant = get_user_model().objects.create_user(
+            username="detail-applicant",
+            github_email="detail-applicant@example.com",
+            name="신청자",
+            student_id=301,
+            major="IT공학",
+        )
+        Member.objects.create(
+            project=self.project,
+            user=applicant,
+            status=Member.Status.CANCELED,
+        )
+        latest_application = Member.objects.create(
+            project=self.project,
+            user=applicant,
+            status=Member.Status.PENDING,
+        )
+        self.client.force_login(applicant)
+
+        response = self.client.get(f"/api/v1/projects/{self.project.pk}")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()["data"]
+        self.assertEqual(
+            data["applicationStatus"],
+            latest_application.status,
+        )
+        self.assertFalse(data["canApply"])
 
     def test_deleted_project_detail_is_not_available(self):
         self.project.status = Project.Status.DELETED
@@ -850,8 +944,11 @@ class ProjectApiTests(TestCase):
         self.assertEqual(repository["description"], "정규화된 설명")
         self.assertEqual(repository["stars"], 12)
         self.assertEqual(repository["forks"], 3)
-        self.assertEqual(repository["language"], "Python")
-        self.assertEqual(repository["githubId"], 101)
+        self.assertEqual(repository["languages"], ["Python"])
+        self.assertNotIn("language", repository)
+        self.assertNotIn("id", repository)
+        self.assertNotIn("githubId", repository)
+        self.assertNotIn("name", repository)
         self.assertNotIn("topics", repository)
         self.assertNotIn("lastStatusCode", repository)
         self.assertNotIn("statusUpdatedAt", repository)
@@ -891,7 +988,10 @@ class ProjectApiTests(TestCase):
             [(member["name"], member["role"]) for member in data["members"]],
             [("권지연", "LEADER"), ("임꺽정", "MEMBER")],
         )
-        self.assertEqual(data["members"][1]["description"], "프론트엔드")
+        self.assertEqual(data["members"][1]["username"], "teammate")
+        self.assertIn("joinedAt", data["members"][1])
+        for field in ("userId", "status", "description", "createdAt"):
+            self.assertNotIn(field, data["members"][1])
 
     def test_inactive_project_leader_cannot_edit_project(self):
         self.project.status = Project.Status.INACTIVE
@@ -1294,20 +1394,8 @@ class ProjectApiTests(TestCase):
         self.assertEqual(response.status_code, 201)
         body = response.json()
         self.assertEqual(body["status"], "SUCCESS")
-        self.assertEqual(body["data"]["name"], "New Project")
-        self.assertNotIn("teamName", body["data"])
-        self.assertNotIn("teamId", body["data"])
-        self.assertNotIn("leaderId", body["data"])
-        self.assertNotIn("repositoryId", body["data"])
-        self.assertNotIn("repositoryUrl", body["data"])
-        self.assertEqual(body["data"]["status"], "ACTIVE")
-        self.assertEqual(body["data"]["maxMembers"], 5)
-        self.assertEqual(body["data"]["membershipRole"], "OWNER")
-        self.assertEqual(
-            body["data"]["repository"]["htmlUrl"],
-            "https://github.com/example/new-project",
-        )
         created_project = Project.objects.get(name="New Project")
+        self.assertEqual(body["data"], {"id": created_project.pk})
         self.assertEqual(created_project.max_members, 5)
         leader_member = created_project.members.get()
         self.assertEqual(leader_member.user, self.user)
@@ -1343,9 +1431,8 @@ class ProjectApiTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         body = response.json()
-        self.assertIsNone(body["data"]["repository"])
-        self.assertEqual(body["data"]["maxMembers"], 5)
         project = Project.objects.get(name="Project Without Repository")
+        self.assertEqual(body["data"], {"id": project.pk})
         self.assertEqual(project.max_members, 5)
         self.assertFalse(Repository.objects.filter(project=project).exists())
         self.assertTrue(project.members.get().is_leader)
@@ -1380,8 +1467,7 @@ class ProjectApiTests(TestCase):
             "존재하는 공개 GitHub Repository URL을 입력해주세요.",
         )
         project = Project.objects.get(name="Invalid Repository Project")
-        self.assertEqual(body["data"]["id"], project.pk)
-        self.assertIsNone(body["data"]["repository"])
+        self.assertEqual(body["data"], {"id": project.pk})
         self.assertFalse(
             Repository.objects.filter(project=project).exists()
         )
@@ -2225,7 +2311,8 @@ class ProjectApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["status"], "SUCCESS")
-        self.assertIsNone(body["detail"])
+        self.assertEqual(body["detail"]["pagination"]["count"], 2)
+        self.assertEqual(body["detail"]["pagination"]["limit"], 12)
         self.assertEqual(
             [membership["id"] for membership in body["data"]],
             [pending.pk, declined.pk],
@@ -2237,9 +2324,38 @@ class ProjectApiTests(TestCase):
         self.assertEqual(body["data"][0]["projectId"], application_project.pk)
         self.assertEqual(body["data"][0]["projectName"], "Application Project")
         self.assertEqual(body["data"][0]["projectStatus"], Project.Status.ACTIVE)
-        self.assertEqual(body["data"][0]["userId"], self.user.pk)
+        self.assertNotIn("userId", body["data"][0])
+        self.assertNotIn("joinedAt", body["data"][0])
         self.assertIn("createdAt", body["data"][0])
         self.assertIn("updatedAt", body["data"][0])
+
+        filtered = self.client.get(
+            "/api/v1/projects/members"
+            "?start=0&limit=1&status=PENDING,DECLINED&sort=oldest"
+        )
+        self.assertEqual(filtered.status_code, 200)
+        self.assertEqual(filtered.json()["data"][0]["id"], declined.pk)
+        self.assertEqual(
+            filtered.json()["detail"]["pagination"]["count"],
+            2,
+        )
+
+    def test_project_membership_history_rejects_invalid_query(self):
+        self.client.force_login(self.user)
+
+        cases = (
+            ("start=-1", "INVALID_PAGINATION_PARAMETER"),
+            ("limit=0", "INVALID_PAGINATION_PARAMETER"),
+            ("limit=101", "INVALID_PAGINATION_PARAMETER"),
+            ("status=UNKNOWN", "INVALID_MEMBER_FILTER"),
+            ("sort=popular", "INVALID_MEMBER_FILTER"),
+        )
+        for query, expected_status in cases:
+            with self.subTest(query=query):
+                response = self.client.get(f"/api/v1/projects/members?{query}")
+
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json()["status"], expected_status)
 
     def test_project_membership_history_returns_empty_list(self):
         self.client.force_login(self.user)
@@ -2459,6 +2575,14 @@ class ProjectApiTests(TestCase):
             {member["id"] for member in response.json()["data"]},
             {self.member.pk, joined.pk},
         )
+        member = response.json()["data"][0]
+        self.assertIn("username", member)
+        self.assertIn("role", member)
+        self.assertIn("joinedAt", member)
+        self.assertNotIn("userId", member)
+        self.assertNotIn("status", member)
+        self.assertNotIn("description", member)
+        self.assertNotIn("createdAt", member)
         self.assertEqual(denied.status_code, 403)
         self.assertEqual(update_denied.status_code, 403)
         self.assertEqual(
@@ -2475,12 +2599,24 @@ class ProjectApiTests(TestCase):
         managed_members = {
             member["id"]: member for member in managed.json()["data"]
         }
-        self.assertEqual(managed_members[joined.pk]["username"], "joined-user")
+        self.assertEqual(managed_members[joined.pk]["name"], "참여자")
         self.assertIn(pending.pk, managed_members)
         self.assertIn("description", managed_members[pending.pk])
         self.assertIsNone(managed_members[pending.pk]["description"])
         self.assertIn("createdAt", managed_members[pending.pk])
-        self.assertIsNone(managed_members[pending.pk]["joinedAt"])
+        self.assertNotIn("username", managed_members[pending.pk])
+        self.assertNotIn("role", managed_members[pending.pk])
+        self.assertNotIn("joinedAt", managed_members[pending.pk])
+
+        pending_only = self.client.get(
+            f"/api/v1/projects/{self.project.pk}/members"
+            "?manage=true&status=PENDING"
+        )
+        self.assertEqual(pending_only.status_code, 200)
+        self.assertEqual(
+            [member["id"] for member in pending_only.json()["data"]],
+            [pending.pk],
+        )
 
     def test_project_members_reject_invalid_manage_filter(self):
         self.client.force_login(self.user)
@@ -2495,6 +2631,34 @@ class ProjectApiTests(TestCase):
             response.json()["detail"]["message"],
             "manage는 true 또는 false여야 합니다.",
         )
+
+    def test_project_members_reject_status_filter_without_manage(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            f"/api/v1/projects/{self.project.pk}/members?status=PENDING"
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["status"], "INVALID_MEMBER_FILTER")
+        self.assertEqual(
+            response.json()["detail"]["message"],
+            (
+                "status는 유효한 멤버 상태이며 manage=true일 때만 "
+                "사용할 수 있습니다."
+            ),
+        )
+
+    def test_project_members_reject_unknown_status_filter(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            f"/api/v1/projects/{self.project.pk}/members"
+            "?manage=true&status=UNKNOWN"
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["status"], "INVALID_MEMBER_FILTER")
 
     def test_non_member_cannot_list_project_members(self):
         outsider = get_user_model().objects.create_user(
