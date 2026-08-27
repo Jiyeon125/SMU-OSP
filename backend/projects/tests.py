@@ -143,7 +143,8 @@ class RepositoryDataModelTests(TestCase):
 
         self.assertEqual(data["stars"], 0)
         self.assertEqual(data["forks"], 0)
-        self.assertIsNone(data["language"])
+        self.assertEqual(data["languages"], [])
+        self.assertNotIn("language", data)
 
 
 class RepositoryRefreshTaskTests(TestCase):
@@ -943,7 +944,8 @@ class ProjectApiTests(TestCase):
         self.assertEqual(repository["description"], "정규화된 설명")
         self.assertEqual(repository["stars"], 12)
         self.assertEqual(repository["forks"], 3)
-        self.assertEqual(repository["language"], "Python")
+        self.assertEqual(repository["languages"], ["Python"])
+        self.assertNotIn("language", repository)
         self.assertNotIn("id", repository)
         self.assertNotIn("githubId", repository)
         self.assertNotIn("name", repository)

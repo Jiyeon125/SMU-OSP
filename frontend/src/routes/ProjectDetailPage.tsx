@@ -603,9 +603,7 @@ export default function ProjectDetailPage() {
   }
 
   const project = resp.data;
-  const repositoryLanguages =
-    project.repository?.languages ??
-    (project.repository?.language ? [project.repository.language] : []);
+  const repositoryLanguages = project.repository?.languages ?? [];
   const {
     canApply,
     unavailableReason: applicationUnavailableReason,
@@ -1010,7 +1008,7 @@ export default function ProjectDetailPage() {
                   <SimpleGrid columns={{ base: 2, md: 4 }} gap={2} mb={3}>
                     <Stat
                       label="주요 언어"
-                      value={project.repository.language || "-"}
+                      value={project.repository.languages[0] || "-"}
                     />
                     <Stat label="stars" value={`${project.repository.stars}`} />
                     <Stat label="forks" value={`${project.repository.forks}`} />

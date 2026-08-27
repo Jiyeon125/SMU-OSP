@@ -38,7 +38,6 @@ export interface ProjectListRepository {
 
 export interface Repository extends ProjectListRepository {
     description?: string | null;
-    language?: string | null;
 }
 
 export interface Project {
