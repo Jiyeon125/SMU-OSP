@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import UTC, date, datetime, time, timedelta
 
 from django.db.models import (
     Count,
@@ -114,8 +114,17 @@ def list_user_ranking_targets(
     period_start: date,
     period_end: date,
 ) -> list[User]:
-    """현재 가입 사용자의 기간별 활동 지표를 조회한다."""
-    return list(_user_ranking_targets(period_start, period_end))
+    """집계 종료일까지 가입한 사용자의 기간별 활동 지표를 조회한다."""
+    period_end_exclusive = datetime.combine(
+        period_end + timedelta(days=1),
+        time.min,
+        tzinfo=UTC,
+    )
+    return list(
+        _user_ranking_targets(period_start, period_end).filter(
+            date_joined__lt=period_end_exclusive,
+        )
+    )
 
 
 def get_user_ranking_target(

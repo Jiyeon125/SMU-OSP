@@ -375,7 +375,17 @@ class UserRankingCacheTests(TestCase):
         self.assertEqual(six_month.total_score, 13)
         self.assertEqual(six_month.period_end, period_end)
 
+    def test_admin_period_excludes_user_joined_after_period_end(self):
+        period_end = self.user.date_joined.date() - timedelta(days=1)
+
+        results = calculate_user_rankings(period_end, period_end)
+
+        self.assertEqual(results, [])
+
     def test_six_month_cache_matches_admin_period_calculation(self):
+        get_user_model().objects.filter(pk=self.user.pk).update(
+            date_joined=datetime(2026, 2, 27, tzinfo=UTC)
+        )
         UserActivity.objects.create(
             user=self.user,
             activity_date=date(2026, 2, 27),
