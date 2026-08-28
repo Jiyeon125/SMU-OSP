@@ -196,6 +196,7 @@ def list_memberships_for_user(
     sort: str,
 ) -> tuple[list[Member], int]:
     """사용자의 팀장 이외 멤버십 이력 한 페이지를 반환한다.
+
     삭제된 프로젝트의 멤버십은 제외하고 상태와 정렬 조건을 적용한다.
 
     Args:
